@@ -17,17 +17,9 @@ class ProxyManager {
       this.proxyMode = result.proxyMode ?? 'all';
       this.urlWhitelist = result.urlWhitelist ?? [];
       this.updateWhitelistCache(this.urlWhitelist);
-      
-      console.log('[ProxyManager] Инициализация:', {
-        enabled: this.isEnabled,
-        mode: this.proxyMode,
-        whitelist: this.urlWhitelist,
-        hasToken: !!result.jwtToken
-      });
-      
+
       const REQUIRE_AUTH = true;
       if (REQUIRE_AUTH && !result.jwtToken) {
-        console.log('[ProxyManager] Нет токена авторизации - подключение отключено');
         this.isEnabled = false;
         await chrome.storage.local.set({ proxyEnabled: false });
         await this.disableProxy();
@@ -49,7 +41,6 @@ class ProxyManager {
               if (REQUIRE_AUTH) {
                 const result = await chrome.storage.local.get('jwtToken');
                 if (!result.jwtToken) {
-                  console.log('[ProxyManager] Попытка подключиться без авторизации - отклонено');
                   this.isEnabled = false;
                   await chrome.storage.local.set({ proxyEnabled: false });
                   await this.disableProxy();
@@ -64,7 +55,6 @@ class ProxyManager {
           
           if (changes.proxyMode) {
             this.proxyMode = changes.proxyMode.newValue;
-            console.log('[ProxyManager] Режим изменён через storage:', this.proxyMode);
             if (this.isEnabled) {
               await this.enableProxy();
             }
@@ -73,14 +63,12 @@ class ProxyManager {
           if (changes.urlWhitelist) {
             this.urlWhitelist = changes.urlWhitelist.newValue || [];
             this.updateWhitelistCache(this.urlWhitelist);
-            console.log('[ProxyManager] Whitelist изменён через storage:', this.urlWhitelist);
             if (this.isEnabled && this.proxyMode === 'whitelist') {
               await this.enableProxy();
             }
           }
           
           if (changes.jwtToken && !changes.jwtToken.newValue) {
-            console.log('[ProxyManager] Токен удален (logout) - отключаю подключение');
             this.isEnabled = false;
             await chrome.storage.local.set({ proxyEnabled: false });
             await this.disableProxy();
@@ -98,7 +86,6 @@ class ProxyManager {
    */
   async updateProxyMode(mode) {
     this.proxyMode = mode;
-    console.log('[ProxyManager] Режим изменён:', mode);
     
     if (this.isEnabled) {
       await this.enableProxy();
@@ -111,7 +98,6 @@ class ProxyManager {
   async updateWhitelist(urls) {
     this.urlWhitelist = urls;
     this.updateWhitelistCache(urls);
-    console.log('[ProxyManager] Whitelist обновлён:', urls);
     
     if (this.isEnabled && this.proxyMode === 'whitelist') {
       await this.enableProxy();
@@ -128,7 +114,6 @@ class ProxyManager {
         this.whitelistCache.set(url.toLowerCase(), true);
       });
     }
-    console.log('[ProxyManager] Кеш whitelist обновлён, элементов:', this.whitelistCache.size);
   }
 
   async enableProxy() {
@@ -143,8 +128,6 @@ class ProxyManager {
             data: pacScript
           }
         };
-        console.log('[ProxyManager] Включаю whitelist режим, URL:', this.urlWhitelist);
-        console.log('[ProxyManager] PAC Script:', pacScript);
       } else {
         proxyConfig = {
           mode: "fixed_servers",
@@ -157,7 +140,6 @@ class ProxyManager {
             bypassList: PROXY_CONFIG.bypassList
           }
         };
-        console.log('[ProxyManager] Включаю режим "все сайты"');
       }
 
       await chrome.proxy.settings.set({
@@ -167,12 +149,6 @@ class ProxyManager {
 
       this.isEnabled = true;
       await chrome.storage.local.set({ proxyEnabled: true });
-      
-      console.log(`[ProxyManager] Подключение установлено: ${PROXY_CONFIG.host}:${PROXY_CONFIG.port}`);
-      
-      chrome.proxy.settings.get({}, (config) => {
-        console.log('[ProxyManager] Текущие настройки подключения:', JSON.stringify(config.value, null, 2));
-      });
       
       if (PROXY_CONFIG.showBadge) {
         this.updateBadge(true);
@@ -202,7 +178,7 @@ class ProxyManager {
       return domain;
     } catch (e) {
       // If conversion fails, return original domain
-      console.warn('[ProxyManager] Punycode conversion failed for:', domain, e);
+      console.warn('[ProxyManager] Punycode conversion failed', e);
       return domain;
     }
   }
@@ -229,14 +205,11 @@ class ProxyManager {
     const bypassList = PROXY_CONFIG.bypassList || [];
     
     if (this.urlWhitelist.length === 0) {
-      console.log('[ProxyManager] Whitelist пустой - все сайты напрямую');
       return `
 function FindProxyForURL(url, host) {
   return "DIRECT";
 }`.trim();
     }
-    
-    console.log('[ProxyManager] Генерирую PAC скрипт для whitelist:', this.urlWhitelist);
     
     // Create pattern matching conditions for whitelist
     const whitelistConditions = this.urlWhitelist.map(pattern => {
@@ -308,13 +281,9 @@ function FindProxyForURL(url, host) {
   return "DIRECT";
 }`.trim();
     
-    console.log('[ProxyManager] Сгенерированный PAC скрипт:');
-    console.log(pacScript);
-    
     // Validate that PAC script contains only ASCII
     if (!/^[\x00-\x7F]*$/.test(pacScript)) {
       console.error('[ProxyManager] PAC script contains non-ASCII characters!');
-      console.error('[ProxyManager] Non-ASCII parts:', pacScript.match(/[^\x00-\x7F]+/g));
     }
     
     return pacScript;
@@ -334,8 +303,6 @@ function FindProxyForURL(url, host) {
       this.isEnabled = false;
       await chrome.storage.local.set({ proxyEnabled: false });
       
-      console.log('[ProxyManager] Подключение отключено');
-      
       if (PROXY_CONFIG.showBadge) {
         this.updateBadge(false);
       }
@@ -350,8 +317,6 @@ function FindProxyForURL(url, host) {
   }
 
   async toggleProxy() {
-    console.log('[ProxyManager] Переключение подключения, текущее состояние:', this.isEnabled);
-    
     if (this.isEnabled) {
       await this.disableProxy();
     } else {

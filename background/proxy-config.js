@@ -1,51 +1,112 @@
 /**
- * Proxy Server Configuration
- * 
- * Configure your proxy server settings here.
- * For local development, use "127.0.0.1"
- * For production, use your VPS IP address
+ * Server Configuration
+ *
+ * Один источник правды для адресов/портов.
+ * Чтобы переключить окружение — поменяйте ACTIVE_ENV.
  */
 
-export const PROXY_CONFIG = {
-  // Proxy server address
-  host: "140.235.130.166",
-  
-  // Proxy server port
-  port: 18183,
-  
-  // Proxy scheme: "http", "https", "socks4", "socks5"
-  scheme: "http",
-  
-  // JWT Authentication
-  auth: {
-    enabled: true,
-    type: "jwt"
+// 'stage' | 'prod' | 'local'
+const ACTIVE_ENV = 'prod';
+
+const ENVIRONMENTS = {
+  stage: {
+    // Proxy server address
+    host: '108.165.174.119',
+
+    // Proxy server port
+    port: 18183,
+
+    // Proxy scheme: "http", "https", "socks4", "socks5"
+    scheme: 'http',
+
+    // JWT Authentication
+    auth: {
+      enabled: true,
+      type: 'jwt'
+    },
+
+    // Auth API server configuration
+    authAPI: {
+      host: '108.165.174.119',
+      port: 18184,
+      baseURL: 'http://108.165.174.119:18184'
+    },
+
+    // Bypass list - addresses that will NOT be proxied
+    // Chrome will connect to them directly
+    bypassList: [
+      'localhost',
+      '127.0.0.1',
+      '*.local',
+      '192.168.*',
+      '10.*',
+      '172.16.*',
+      '<local>', // Chrome special notation for local addresses
+      // Proxy/Auth hosts - do not proxy requests to the server itself
+      '108.165.174.119'
+    ],
+
+    // Auto-enable proxy on browser startup
+    // IMPORTANT: Should be false to prevent proxy from enabling without authentication
+    autoEnable: false,
+
+    // Show badge with status
+    showBadge: true
   },
-  
-  // Auth API server configuration
-  authAPI: {
-    host: "140.235.130.166",
-    port: 18184,
-    baseURL: "http://140.235.130.166:18184"
+
+  prod: {
+    host: '140.235.130.166',
+    port: 18183,
+    scheme: 'http',
+    auth: {
+      enabled: true,
+      type: 'jwt'
+    },
+    authAPI: {
+      host: 'vpsconect.online',
+      port: 18433,
+      baseURL: 'https://vpsconect.online:18433'
+    },
+    bypassList: [
+      'localhost',
+      '127.0.0.1',
+      '*.local',
+      '192.168.*',
+      '10.*',
+      '172.16.*',
+      '<local>',
+      'vpsconect.online',
+      '*.vpsconect.online'
+    ],
+    autoEnable: false,
+    showBadge: true
   },
-  
-  // Bypass list - addresses that will NOT be proxied
-  // Chrome will connect to them directly
-  bypassList: [
-    "localhost",
-    "127.0.0.1",
-    "*.local",
-    "192.168.*",
-    "10.*",
-    "172.16.*",
-    "<local>",  // Chrome special notation for local addresses
-    "140.235.130.166"  // Auth API - do not proxy! (bypass entire host, not just port)
-  ],
-  
-  // Auto-enable proxy on browser startup
-  // IMPORTANT: Should be false to prevent proxy from enabling without authentication
-  autoEnable: false,
-  
-  // Show badge with status
-  showBadge: true
+
+  local: {
+    host: '127.0.0.1',
+    port: 18183,
+    scheme: 'http',
+    auth: {
+      enabled: true,
+      type: 'jwt'
+    },
+    authAPI: {
+      host: '127.0.0.1',
+      port: 18184,
+      baseURL: 'http://127.0.0.1:18184'
+    },
+    bypassList: [
+      'localhost',
+      '127.0.0.1',
+      '*.local',
+      '192.168.*',
+      '10.*',
+      '172.16.*',
+      '<local>'
+    ],
+    autoEnable: false,
+    showBadge: true
+  }
 };
+
+export const PROXY_CONFIG = ENVIRONMENTS[ACTIVE_ENV];

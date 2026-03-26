@@ -3,14 +3,26 @@ import { proxyManager } from './proxy-manager.js';
 import { PROXY_CONFIG } from './proxy-config.js';
 import { getJWTToken, isAuthenticated } from './auth-api.js';
 
-console.log('[Service Worker] VPS Connect запущен');
-
 let jwtTokenCache = null;
+let tokenLoadPromise = null;
 
-(async () => {
-  jwtTokenCache = await getJWTToken();
-  console.log('[Service Worker] JWT токен загружен в кеш:', jwtTokenCache ? 'Да' : 'Нет');
-})();
+// Загружаем токен при старте service worker и сохраняем Promise
+function loadToken() {
+  if (!tokenLoadPromise) {
+    tokenLoadPromise = (async () => {
+      try {
+        jwtTokenCache = await getJWTToken();
+      } catch (e) {
+        console.error('[Service Worker] Ошибка загрузки токена:', e);
+      }
+      return jwtTokenCache;
+    })();
+  }
+  return tokenLoadPromise;
+}
+
+// Запускаем загрузку сразу
+loadToken();
 
 const AUTH_STATE_KEY = 'auth_flow_state';
 const AUTH_ALARM = 'auth_flow_state_expire';
@@ -18,69 +30,58 @@ const AUTH_ALARM = 'auth_flow_state_expire';
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.jwtToken) {
     jwtTokenCache = changes.jwtToken.newValue;
-    console.log('[Service Worker] JWT токен обновлен в кеше');
+    // Сбрасываем promise чтобы следующий loadToken() вернул актуальный токен
+    tokenLoadPromise = Promise.resolve(jwtTokenCache);
   }
 });
 
 chrome.webRequest.onAuthRequired.addListener(
-  function(details) {
-    console.log('[Service Worker] 🔐 Запрос авторизации сервера (407)');
-    console.log('[Service Worker] URL:', details.url);
-    console.log('[Service Worker] isProxy:', details.isProxy);
-    console.log('[Service Worker] Realm:', details.realm);
-    console.log('[Service Worker] Scheme:', details.scheme);
-    
+  function(details, callback) {
+    // Игнорируем не-прокси запросы
     if (!details.isProxy) {
-      console.log('[Service Worker] Не запрос к серверу, пропускаем');
-      return {};
+      if (callback) callback({});
+      return;
     }
     
-    if (jwtTokenCache) {
-      console.log('[Service Worker] ✅ Предоставляем JWT токен для авторизации');
-      console.log('[Service Worker] Token (first 20 chars):', jwtTokenCache.substring(0, 20) + '...');
-      return {
-        authCredentials: {
-          username: 'Bearer',
-          password: jwtTokenCache
-        }
-      };
-    } else {
-      console.error('[Service Worker] ❌ JWT токен отсутствует, отменяем запрос');
-      return { cancel: true };
-    }
+    // Ждём загрузки токена перед ответом (решает race condition)
+    loadToken().then((token) => {
+      if (token) {
+        callback({
+          authCredentials: {
+            username: 'Bearer',
+            password: token
+          }
+        });
+      } else {
+        // Токена нет - отменяем запрос чтобы браузер НЕ показывал диалог
+        console.warn('[Service Worker] ⚠️ Прокси-аутентификация без токена, отменяем запрос');
+        callback({ cancel: true });
+      }
+    }).catch(() => {
+      callback({ cancel: true });
+    });
   },
   { urls: ["<all_urls>"] },
-  ["blocking"]
+  ["asyncBlocking"]
 );
 
 chrome.webRequest.onBeforeSendHeaders.addListener(
   function(details) {
     try {
       const url = new URL(details.url);
-      const isAuthAPI = url.hostname === '140.235.130.166' && url.port === '18184';
+      const expectedPort = String(PROXY_CONFIG.authAPI?.port ?? '');
+      const isAuthAPI = url.hostname === PROXY_CONFIG.authAPI?.host && url.port === expectedPort;
       
       if (isAuthAPI) {
-        // Auth API запросы (включая billing) уже имеют Authorization заголовок из popup.js
-        console.log('[Service Worker] Auth API запрос:', details.url);
-        console.log('[Service Worker] Метод:', details.method);
-        console.log('[Service Worker] Заголовки запроса:', details.requestHeaders.map(h => `${h.name}: ${h.value.substring(0, 50)}...`));
-        
-        // Проверяем наличие Authorization заголовка
-        const hasAuth = details.requestHeaders.some(h => h.name.toLowerCase() === 'authorization');
-        console.log('[Service Worker] Authorization заголовок присутствует:', hasAuth);
-        
-        // ВАЖНО: Для Auth API не нужен Proxy-Authorization, только Authorization
-        // Убедимся что Proxy-Authorization НЕ добавлен
         const hasProxyAuth = details.requestHeaders.some(h => h.name.toLowerCase() === 'proxy-authorization');
         if (hasProxyAuth) {
-          console.warn('[Service Worker] ⚠️ ВНИМАНИЕ: Proxy-Authorization найден в Auth API запросе! Удаляю...');
           details.requestHeaders = details.requestHeaders.filter(h => h.name.toLowerCase() !== 'proxy-authorization');
         }
         
         return { requestHeaders: details.requestHeaders };
       }
     } catch (e) {
-      console.log('[Service Worker] Не удалось распарсить URL (возможно CONNECT):', details.url);
+      console.warn('[Service Worker] Не удалось распарсить URL (возможно CONNECT)');
     }
     
     const hasProxyAuth = details.requestHeaders.some(
@@ -88,21 +89,16 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     );
     
     if (hasProxyAuth) {
-      console.log('[Service Worker] Proxy-Authorization уже есть, пропускаю');
       return { requestHeaders: details.requestHeaders };
     }
     
     if (jwtTokenCache) {
-      console.log('[Service Worker] 📤 Добавляю JWT токен к запросу:', details.method, details.url);
-      
       details.requestHeaders.push({
         name: 'Proxy-Authorization',
         value: `Bearer ${jwtTokenCache}`
       });
-      
-      console.log('[Service Worker] ✅ JWT токен добавлен');
     } else {
-      console.warn('[Service Worker] ⚠️ JWT токен отсутствует для запроса:', details.url);
+      console.warn('[Service Worker] ⚠️ JWT токен отсутствует для исходящего запроса');
     }
     
     return { requestHeaders: details.requestHeaders };
@@ -111,36 +107,23 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
   ["requestHeaders", "extraHeaders"]
 );
 
-chrome.runtime.onInstalled.addListener((details) => {
-  console.log('[Service Worker] Расширение установлено:', details.reason);
-  
-  if (details.reason === 'install') {
-    console.log('[Service Worker] Первая установка расширения');
-    
-    
-  } else if (details.reason === 'update') {
-    console.log('[Service Worker] Расширение обновлено');
-  }
+chrome.runtime.onInstalled.addListener(() => {
+  // без лишних логов, т.к. событие не несёт чувствительные данные
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  console.log('[Service Worker] Браузер запущен');
+  // без логов
 });
 
 chrome.action.onClicked.addListener(async () => {
-  console.log('[Service Worker] Клик на иконку расширения');
-  
   try {
-    const newState = await proxyManager.toggleProxy();
-    console.log('[Service Worker] Новое состояние прокси:', newState);
+    await proxyManager.toggleProxy();
   } catch (error) {
     console.error('[Service Worker] Ошибка при toggle:', error);
   }
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('[Service Worker] Получено сообщение:', request);
-  
   (async () => {
     try {
       switch (request.action) {
@@ -223,7 +206,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === AUTH_ALARM) {
     try {
       await chrome.storage.session.remove(AUTH_STATE_KEY);
-      console.log('[Service Worker] Auth state expired and cleared');
     } catch (e) {
       console.error('[Service Worker] Failed to clear auth state on alarm:', e);
     }
@@ -231,12 +213,15 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 chrome.proxy.onProxyError.addListener((details) => {
-  console.error('[Service Worker] ❌ Ошибка прокси:', details);
-  console.error('[Service Worker] Fatal:', details.fatal);
-  console.error('[Service Worker] Error:', details.error);
-  console.error('[Service Worker] Details:', details.details);
+  if (!details) {
+    console.error('[Service Worker] ❌ Ошибка прокси: неизвестная ошибка');
+    return;
+  }
   
-  // proxyManager.disableProxy();
+  console.error('[Service Worker] ❌ Ошибка прокси:', details.error || 'unknown');
+  if (typeof details.fatal !== 'undefined') {
+    console.error('[Service Worker] Fatal:', details.fatal);
+  }
 });
 
 
@@ -253,5 +238,3 @@ setInterval(() => {
     }
   });
 }, 30000);
-
-console.log('[Service Worker] Инициализация завершена');

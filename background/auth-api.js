@@ -19,7 +19,6 @@ export async function registerUser(email, password) {
         }
         
         const data = await response.json();
-        console.log('Registration initiated, email verification required');
         return data;
     } catch (error) {
         console.error('Registration error:', error);
@@ -50,7 +49,6 @@ export async function verifyEmail(email, code) {
             isAuthenticated: true
         });
         
-        console.log('Email verified successfully:', data.user.email);
         return data;
     } catch (error) {
         console.error('Verification error:', error);
@@ -81,7 +79,6 @@ export async function loginUser(email, password) {
             isAuthenticated: true
         });
         
-        console.log('User logged in successfully:', data.user.email);
         return data;
     } catch (error) {
         console.error('Login error:', error);
@@ -96,7 +93,6 @@ export async function verifyToken(token) {
             return false;
         }
         
-        console.log('[Auth API] Проверка токена на сервере...');
         
         const response = await fetch(`${AUTH_API_URL}/api/auth/verify`, {
             method: 'POST',
@@ -118,7 +114,6 @@ export async function verifyToken(token) {
             isAuthenticated: true
         });
         
-        console.log('[Auth API] Токен валиден, пользователь:', data.email);
         return true;
     } catch (error) {
         console.error('[Auth API] Ошибка проверки токена:', error);
@@ -150,7 +145,6 @@ export async function getCurrentUser(token) {
 export async function logoutUser() {
     try {
         await chrome.storage.local.remove(['jwtToken', 'user', 'isAuthenticated']);
-        console.log('User logged out');
     } catch (error) {
         console.error('Logout error:', error);
         throw error;

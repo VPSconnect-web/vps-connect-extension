@@ -2,10 +2,7 @@
 import { PROXY_CONFIG } from '../background/proxy-config.js';
 
 // API Configuration
-//const API_BASE_URL = `http://localhost:18184/api`;
-const API_BASE_URL = `http://140.235.130.166:18184/api`;
-
-console.log('[Popup] API URL:', API_BASE_URL);
+const API_BASE_URL = `${PROXY_CONFIG.authAPI.baseURL}/api`;
 
 // DOM Elements
 const authView = document.getElementById('auth-view');
@@ -21,6 +18,17 @@ const loginForm = document.getElementById('loginForm');
 const registerForm = document.getElementById('registerForm');
 const verifyForm = document.getElementById('verifyForm');
 const backToRegisterBtn = document.getElementById('back-to-register');
+const forgotPasswordLink = document.getElementById('forgot-password-link');
+
+// Forgot password modal
+const forgotPasswordModal = document.getElementById('forgot-password-modal');
+const forgotPasswordForm = document.getElementById('forgotPasswordForm');
+const forgotPasswordEmailInput = document.getElementById('forgot-password-email');
+const forgotPasswordCancelBtn = document.getElementById('forgot-password-cancel');
+
+// Force change password view
+const forceChangeView = document.getElementById('force-change-view');
+const forceChangePasswordForm = document.getElementById('forceChangePasswordForm');
 
 // Dashboard elements
 const toggleProxyBtn = document.getElementById('toggle-proxy');
@@ -43,6 +51,12 @@ const urlList = document.getElementById('url-list');
 const loginError = document.getElementById('login-error');
 const registerError = document.getElementById('register-error');
 const verifyError = document.getElementById('verify-error');
+const forceChangeError = document.getElementById('force-change-error');
+const forgotPasswordError = document.getElementById('forgot-password-error');
+
+// Notification banner elements
+const notificationBanner = document.getElementById('notification-banner');
+const notificationText = document.getElementById('notification-text');
 
 // Subscription elements
 const subscriptionSection = document.getElementById('subscription-section');
@@ -60,6 +74,162 @@ let selectedPeriod = 3; // Default: 3 months
 
 const AUTH_STATE_KEY = 'auth_flow_state';
 const TTL_MS = 5 * 60 * 1000;
+
+// Password reset flow
+const PENDING_RESET_EMAIL_KEY = 'pendingPasswordResetEmail';
+const PENDING_RESET_TEMP_PASSWORD_KEY = 'pendingTempPassword';
+
+/**
+ * Forgot password modal controls
+ */
+function openForgotPasswordModal() {
+    if (!forgotPasswordModal) return;
+
+    // Pre-fill email from login form if available
+    const loginEmailInput = document.getElementById('login-email');
+    if (loginEmailInput && forgotPasswordEmailInput) {
+        forgotPasswordEmailInput.value = loginEmailInput.value.trim();
+    }
+
+    if (forgotPasswordError) {
+        hideError(forgotPasswordError);
+    }
+
+    forgotPasswordModal.classList.remove('hidden');
+    if (forgotPasswordEmailInput) {
+        forgotPasswordEmailInput.focus();
+    }
+}
+
+function closeForgotPasswordModal() {
+    if (!forgotPasswordModal) return;
+    forgotPasswordModal.classList.add('hidden');
+}
+
+/**
+ * Handle forgot password submit
+ */
+async function handleForgotPassword(e) {
+    if (e) {
+        e.preventDefault();
+    }
+
+    if (!forgotPasswordEmailInput) return;
+
+    const email = forgotPasswordEmailInput.value.trim();
+
+    if (!email) {
+        showError(forgotPasswordError, 'Введите email, чтобы сбросить пароль');
+        return;
+    }
+
+    hideError(forgotPasswordError);
+    showLoading();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+
+        if (response.ok) {
+            await savePendingPasswordResetEmail(email);
+            alert('Если такой email зарегистрирован, мы отправили туда временный пароль.');
+            closeForgotPasswordModal();
+        } else {
+            console.error('[Popup] Forgot password error status:', response.status);
+            showError(forgotPasswordError, 'Не удалось отправить письмо, попробуйте позже');
+        }
+    } catch (error) {
+        console.error('[Popup] Forgot password error:', error);
+        showError(forgotPasswordError, 'Не удалось отправить письмо, попробуйте позже');
+    } finally {
+        hideLoading();
+    }
+}
+
+/**
+ * Handle force change password after login with temporary password
+ */
+async function handleForceChangePassword(e) {
+    e.preventDefault();
+
+    const newPassword = document.getElementById('new-password').value;
+    const newPasswordConfirm = document.getElementById('new-password-confirm').value;
+
+    hideError(forceChangeError);
+
+    if (newPassword !== newPasswordConfirm) {
+        showError(forceChangeError, 'Пароли не совпадают');
+        return;
+    }
+
+    if (newPassword.length < 8) {
+        showError(forceChangeError, 'Пароль должен содержать минимум 8 символов');
+        return;
+    }
+
+    showLoading();
+
+    try {
+        const token = await getToken();
+        const pending = await getPendingPasswordReset();
+
+        if (!token) {
+            showError(forceChangeError, 'Токен не найден. Пожалуйста, войдите снова.');
+            hideLoading();
+            return;
+        }
+
+        if (!pending.tempPassword) {
+            showError(forceChangeError, 'Временный пароль не найден. Пожалуйста, войдите снова.');
+            hideLoading();
+            return;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                old_password: pending.tempPassword,
+                new_password: newPassword
+            })
+        });
+
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('[Popup] Не JSON ответ:', text);
+            throw new Error(`Сервер вернул ${response.status}: ${text.substring(0, 100)}`);
+        }
+
+        const data = await response.json();
+
+        if (response.ok) {
+            await clearPendingPasswordReset();
+            alert('Пароль успешно изменён!');
+            forceChangePasswordForm.reset();
+            await showDashboard();
+        } else {
+            if (data.error && data.error.includes('invalid old password')) {
+                showError(forceChangeError, 'Неверный временный пароль');
+            } else if (data.error && data.error.includes('password validation failed')) {
+                showError(forceChangeError, 'Пароль не соответствует требованиям');
+            } else {
+                showError(forceChangeError, data.error || 'Ошибка смены пароля');
+            }
+        }
+    } catch (error) {
+        console.error('[Popup] Force change password error:', error);
+        showError(forceChangeError, 'Не удалось подключиться к серверу');
+    } finally {
+        hideLoading();
+    }
+}
 
 async function loadAuthState() {
     const res = await chrome.storage.session.get(AUTH_STATE_KEY);
@@ -96,11 +266,108 @@ async function tryRestoreAuthState() {
     }
 }
 
+// Password reset helpers
+async function getPendingPasswordReset() {
+    const res = await chrome.storage.local.get([PENDING_RESET_EMAIL_KEY, PENDING_RESET_TEMP_PASSWORD_KEY]);
+    return {
+        email: res[PENDING_RESET_EMAIL_KEY] || null,
+        tempPassword: res[PENDING_RESET_TEMP_PASSWORD_KEY] || null
+    };
+}
+
+async function savePendingPasswordResetEmail(email) {
+    await chrome.storage.local.set({ [PENDING_RESET_EMAIL_KEY]: email });
+}
+
+async function savePendingTempPassword(password) {
+    await chrome.storage.local.set({ [PENDING_RESET_TEMP_PASSWORD_KEY]: password });
+}
+
+async function clearPendingPasswordReset() {
+    await chrome.storage.local.remove([PENDING_RESET_EMAIL_KEY, PENDING_RESET_TEMP_PASSWORD_KEY]);
+}
+
+/**
+ * Notification Banner Functions
+ */
+
+// URL страницы уведомлений на сайте
+const NOTIFICATIONS_URL = 'https://www.vpsconect.ru/notifications.html';
+
+// Fetch and parse notifications from HTML page
+async function fetchNotifications() {
+    try {
+        const response = await fetch(NOTIFICATIONS_URL, {
+            method: 'GET',
+            cache: 'no-cache'
+        });
+        
+        if (!response.ok) {
+            return null;
+        }
+        
+        const html = await response.text();
+        
+        // Parse HTML
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        // Find notification element
+        const notificationEl = doc.getElementById('notification');
+        
+        if (!notificationEl) {
+            return null;
+        }
+        
+        // Extract data
+        const notification = {
+            id: notificationEl.dataset.id || 'default',
+            type: notificationEl.dataset.type || 'info',
+            message: notificationEl.textContent.trim()
+        };
+        
+        // Skip empty messages
+        if (!notification.message) {
+            return null;
+        }
+        
+        return { notification };
+    } catch (error) {
+        console.warn('[Popup] Failed to fetch notifications:', error);
+        return null;
+    }
+}
+
+// Show notification banner
+function showNotificationBanner(notification) {
+    if (!notification || !notificationBanner || !notificationText) return;
+    
+    // Set type class (info, warning, error, success)
+    notificationBanner.className = 'notification-banner';
+    notificationBanner.classList.add(notification.type || 'info');
+    
+    // Set text
+    notificationText.textContent = notification.message;
+    
+    // Show banner
+    notificationBanner.classList.remove('hidden');
+}
+
+// Load and display notifications
+async function loadNotifications() {
+    const data = await fetchNotifications();
+    
+    if (data && data.notification) {
+        showNotificationBanner(data.notification);
+    }
+}
+
 /**
  * Initialize popup
  */
 async function init() {
-    console.log('[Popup] Initializing...');
+    // Load notifications from server (non-blocking)
+    loadNotifications();
     
     // Check if user is authenticated
     const token = await getToken();
@@ -146,6 +413,19 @@ function setupEventListeners() {
     // Verify form
     verifyForm.addEventListener('submit', handleVerifyEmail);
     backToRegisterBtn.addEventListener('click', async () => { await clearAuthState(); switchTab('register'); });
+
+    // Forgot password
+    if (forgotPasswordLink) {
+        forgotPasswordLink.addEventListener('click', openForgotPasswordModal);
+    }
+
+    if (forgotPasswordCancelBtn) {
+        forgotPasswordCancelBtn.addEventListener('click', closeForgotPasswordModal);
+    }
+
+    if (forgotPasswordForm) {
+        forgotPasswordForm.addEventListener('submit', handleForgotPassword);
+    }
     
     // Toggle proxy
     toggleProxyBtn.addEventListener('click', handleToggleProxy);
@@ -174,6 +454,11 @@ function setupEventListeners() {
         });
     });
     applySelectedPeriodVisual();
+
+    // Force change password form
+    if (forceChangePasswordForm) {
+        forceChangePasswordForm.addEventListener('submit', handleForceChangePassword);
+    }
 }
 
 function applySelectedPeriodVisual() {
@@ -217,16 +502,11 @@ async function handleLogin(e) {
     showLoading();
     
     try {
-        console.log('[Popup] Вход:', email);
-        console.log('[Popup] API URL:', `${API_BASE_URL}/auth/login`);
-        
         const response = await fetch(`${API_BASE_URL}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
         });
-        
-        console.log('[Popup] Response status:', response.status);
         
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
@@ -236,15 +516,35 @@ async function handleLogin(e) {
         }
         
         const data = await response.json();
-        console.log('[Popup] Response data:', data);
         
         if (response.ok) {
             // Save token
             await saveToken(data.token);
             await saveUser(data.user);
-            
-            // Show dashboard
-            await showDashboard();
+
+            // Check if this login follows a password reset request
+            const pending = await getPendingPasswordReset();
+            if (pending.email && pending.email === email) {
+                // Treat entered password as temporary password for change-password flow
+                await savePendingTempPassword(password);
+                await showForceChangePasswordView();
+            } else {
+                // Show dashboard
+                await showDashboard();
+                
+                // Автоматически включаем VPS подключение после логина
+                const proxyEnabled = await getProxyStatus();
+                if (!proxyEnabled) {
+                    try {
+                        const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
+                        if (response.success) {
+                            updateProxyStatus(response.enabled);
+                        }
+                    } catch (error) {
+                        console.error('[Popup] Failed to auto-enable proxy after login:', error);
+                    }
+                }
+            }
             
             // Reset form
             loginForm.reset();
@@ -286,17 +586,11 @@ async function handleRegister(e) {
     showLoading();
     
     try {
-        console.log('[Popup] Регистрация:', email);
-        console.log('[Popup] API URL:', `${API_BASE_URL}/auth/register`);
-        
         const response = await fetch(`${API_BASE_URL}/auth/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
         });
-        
-        console.log('[Popup] Response status:', response.status);
-        console.log('[Popup] Response headers:', [...response.headers.entries()]);
         
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
@@ -306,7 +600,6 @@ async function handleRegister(e) {
         }
         
         const data = await response.json();
-        console.log('[Popup] Response data:', data);
         
         if (response.ok) {
             pendingVerificationEmail = email;
@@ -342,8 +635,6 @@ async function handleVerifyEmail(e) {
     showLoading();
     
     try {
-        console.log('[Popup] Верификация email:', pendingVerificationEmail);
-        
         const response = await fetch(`${API_BASE_URL}/auth/verify-email`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -354,7 +645,6 @@ async function handleVerifyEmail(e) {
         });
         
         const data = await response.json();
-        console.log('[Popup] Verification response:', data);
         
         if (response.ok) {
             await saveToken(data.token);
@@ -402,6 +692,7 @@ async function handleToggleProxy() {
 async function handleLogout() {
     await clearToken();
     await clearUser();
+    await clearPendingPasswordReset();
     showAuth();
 }
 
@@ -431,11 +722,17 @@ async function verifyToken(token) {
 function showAuth() {
     authView.classList.remove('hidden');
     dashboardView.classList.add('hidden');
+    if (forceChangeView) {
+        forceChangeView.classList.add('hidden');
+    }
 }
 
 async function showDashboard() {
     authView.classList.add('hidden');
     dashboardView.classList.remove('hidden');
+    if (forceChangeView) {
+        forceChangeView.classList.add('hidden');
+    }
     
     // Load proxy status
     const proxyEnabled = await getProxyStatus();
@@ -468,6 +765,14 @@ async function showDashboard() {
     
     // Load subscription info
     await loadSubscription();
+}
+
+async function showForceChangePasswordView() {
+    authView.classList.add('hidden');
+    dashboardView.classList.add('hidden');
+    if (forceChangeView) {
+        forceChangeView.classList.remove('hidden');
+    }
 }
 
 /**
@@ -777,9 +1082,7 @@ async function handleAddUrl() {
             }
         }
         
-        // Show info about added domains
-        const addedDomains = [normalizedUrl, ...relatedDomains].join(', ');
-        console.log('[Popup] Добавлены домены:', addedDomains);
+        // Дополнительные домены добавлены без логирования
     }
     
     await saveUrlWhitelist(whitelist);
@@ -1007,11 +1310,6 @@ async function handleBuySubscription() {
         
         showLoading();
         
-        console.log('[Popup] Создание платежа...');
-        console.log('[Popup] URL:', `${API_BASE_URL}/billing/payment`);
-        console.log('[Popup] Token (first 20 chars):', token.substring(0, 20) + '...');
-        console.log('[Popup] Period:', selectedPeriod);
-        
         // Create payment
         const response = await fetch(`${API_BASE_URL}/billing/payment`, {
             method: 'POST',
@@ -1031,13 +1329,8 @@ async function handleBuySubscription() {
         
         hideLoading();
         
-        console.log('[Popup] Response status:', response.status);
-        console.log('[Popup] Response headers:', [...response.headers.entries()]);
-        console.log('[Popup] Response type:', response.type);
-        
         if (!response.ok) {
             const contentType = response.headers.get('content-type');
-            console.log('[Popup] Error response content-type:', contentType);
             
             let errorMessage = 'Unknown error';
             if (contentType && contentType.includes('application/json')) {
@@ -1061,8 +1354,6 @@ async function handleBuySubscription() {
         }
         
         const payment = await response.json();
-        
-        console.log('[Popup] Payment created:', payment);
         
         // Open payment URL in new tab
         if (payment.confirmation_url) {

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "VPS Connect",
-  "version": "1.0.0",
-  "description": "Быстрое подключение к вашему VPS серверу в один клик",
+  "version": "1.0.6",
+  "description": "Быстрое подключение к VPS серверу в один клик",
   
   "permissions": [
     "proxy",

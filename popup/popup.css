@@ -108,6 +108,86 @@ body {
     font-weight: 700;
 }
 
+/* Notification Banner */
+.notification-banner {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.4;
+    animation: slideDown 0.3s ease-out;
+}
+
+.notification-banner.hidden {
+    display: none;
+}
+
+.notification-banner.info {
+    background: #e3f2fd;
+    color: #1565c0;
+    border-bottom: 1px solid #90caf9;
+}
+
+.notification-banner.warning {
+    background: #fff8e1;
+    color: #f57c00;
+    border-bottom: 1px solid #ffcc80;
+}
+
+.notification-banner.error {
+    background: #ffebee;
+    color: #c62828;
+    border-bottom: 1px solid #ef9a9a;
+}
+
+.notification-banner.success {
+    background: #e8f5e9;
+    color: #2e7d32;
+    border-bottom: 1px solid #a5d6a7;
+}
+
+.notification-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    flex: 1;
+}
+
+.notification-icon::before {
+    font-size: 14px;
+}
+
+.notification-banner.info .notification-icon::before {
+    content: "ℹ️";
+}
+
+.notification-banner.warning .notification-icon::before {
+    content: "⚠️";
+}
+
+.notification-banner.error .notification-icon::before {
+    content: "🚨";
+}
+
+.notification-banner.success .notification-icon::before {
+    content: "✅";
+}
+
+.notification-text {
+    flex: 1;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 /* Views */
 .view {
     flex: 1;
@@ -362,6 +442,27 @@ body {
     margin-top: 4px;
     font-size: 12px;
     color: #666;
+}
+
+.form-group.text-right {
+    text-align: right;
+    margin-bottom: 8px;
+}
+
+.link-button {
+    background: none;
+    border: none;
+    color: #4285F4;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.link-button:hover {
+    color: #3367d6;
+    text-decoration: underline;
 }
 
 /* Buttons */
@@ -702,6 +803,49 @@ body {
 
 .form-buttons .btn {
     flex: 1;
+}
+
+/* Forgot Password Modal */
+.forgot-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+}
+
+.forgot-modal.hidden {
+    display: none;
+}
+
+.forgot-modal-content {
+    background: #ffffff;
+    border-radius: 10px;
+    padding: 20px 18px 18px 18px;
+    width: 320px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.forgot-modal-content h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.forgot-description {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 16px;
+}
+
+#forgot-password-email {
+    width: 100%;
 }
 
 /* URL List */
