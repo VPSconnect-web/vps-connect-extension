@@ -5,6 +5,7 @@ import { getJWTToken, isAuthenticated } from './auth-api.js';
 
 let jwtTokenCache = null;
 let tokenLoadPromise = null;
+let lastProxyError = null;
 
 // Загружаем токен при старте service worker и сохраняем Promise
 function loadToken() {
@@ -26,6 +27,20 @@ loadToken();
 
 const AUTH_STATE_KEY = 'auth_flow_state';
 const AUTH_ALARM = 'auth_flow_state_expire';
+
+function syncRuntimeProxyState(config) {
+  const mode = config?.value?.mode;
+  const actuallyEnabled = mode === 'fixed_servers' || mode === 'pac_script';
+
+  if (actuallyEnabled !== proxyManager.isEnabled) {
+    console.warn('[Service Worker] Рассинхронизация состояния! Исправляю...');
+    proxyManager.isEnabled = actuallyEnabled;
+  }
+
+  if (PROXY_CONFIG.showBadge) {
+    proxyManager.updateBadge(actuallyEnabled);
+  }
+}
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'local' && changes.jwtToken) {
@@ -129,11 +144,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       switch (request.action) {
         case 'getStatus':
           const status = proxyManager.getStatus();
-          sendResponse({ success: true, data: status });
+          sendResponse({ success: true, data: { ...status, lastError: lastProxyError } });
           break;
           
         case 'toggleProxy':
           if (proxyManager.isEnabled) {
+            lastProxyError = null;
             const disabledState = await proxyManager.toggleProxy();
             sendResponse({ success: true, enabled: disabledState });
             break;
@@ -145,11 +161,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             break;
           }
 
+          lastProxyError = null;
           const newState = await proxyManager.toggleProxy();
           sendResponse({ success: true, enabled: newState });
           break;
           
         case 'toggle':
+          lastProxyError = null;
           const toggleState = await proxyManager.toggleProxy();
           sendResponse({ success: true, enabled: toggleState });
           break;
@@ -162,11 +180,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             break;
           }
           
+          lastProxyError = null;
           await proxyManager.enableProxy();
           sendResponse({ success: true, enabled: true });
           break;
           
         case 'disable':
+          lastProxyError = null;
           await proxyManager.disableProxy();
           sendResponse({ success: true, enabled: false });
           break;
@@ -219,27 +239,17 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 chrome.proxy.onProxyError.addListener((details) => {
   if (!details) {
+    lastProxyError = 'unknown';
     console.error('[Service Worker] ❌ Ошибка прокси: неизвестная ошибка');
     return;
   }
   
+  lastProxyError = details.error || 'unknown';
   console.error('[Service Worker] ❌ Ошибка прокси:', details.error || 'unknown');
   if (typeof details.fatal !== 'undefined') {
     console.error('[Service Worker] Fatal:', details.fatal);
   }
 });
 
-
-setInterval(() => {
-  chrome.proxy.settings.get({}, (config) => {
-    const mode = config.value.mode;
-    
-    const actuallyEnabled = (mode === 'fixed_servers' || mode === 'pac_script');
-    
-    if (actuallyEnabled !== proxyManager.isEnabled) {
-      console.warn('[Service Worker] Рассинхронизация состояния! Исправляю...');
-      proxyManager.isEnabled = actuallyEnabled;
-      proxyManager.updateBadge(actuallyEnabled);
-    }
-  });
-}, 30000);
+chrome.proxy.settings.onChange.addListener(syncRuntimeProxyState);
+chrome.proxy.settings.get({}, syncRuntimeProxyState);

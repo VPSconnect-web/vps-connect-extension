@@ -330,6 +330,8 @@ function FindProxyForURL(url, host) {
   getStatus() {
     return {
       enabled: this.isEnabled,
+      mode: this.proxyMode,
+      whitelistCount: this.urlWhitelist.length,
       config: {
         host: PROXY_CONFIG.host,
         port: PROXY_CONFIG.port,

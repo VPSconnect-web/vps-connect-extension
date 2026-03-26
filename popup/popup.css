@@ -141,6 +141,12 @@ body {
     animation: slideDown 0.3s ease-out;
 }
 
+.notification-banner[data-temporary="true"] {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
 .notification-banner.hidden {
     display: none;
 }
@@ -499,6 +505,14 @@ body {
     gap: 8px;
 }
 
+.btn:disabled,
+.btn[aria-busy="true"],
+.btn-icon:disabled {
+    opacity: 0.65;
+    cursor: wait;
+    pointer-events: none;
+}
+
 .btn-primary {
     background: linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-accent) 100%);
     color: white;
@@ -768,7 +782,6 @@ body {
 
 .whitelist-header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     margin-bottom: 12px;
 }
@@ -777,28 +790,6 @@ body {
     font-size: 13px;
     font-weight: 500;
     color: var(--text-primary);
-}
-
-.btn-icon {
-    width: 28px;
-    height: 28px;
-    padding: 6px;
-    background: var(--brand-primary);
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.2s;
-}
-
-.btn-icon:hover {
-    background: var(--brand-primary-strong);
-}
-
-.btn-icon svg {
-    color: white;
 }
 
 .add-url-form {
