@@ -1,24 +1,17 @@
-
 import { PROXY_CONFIG } from './proxy-config.js';
+import { requestJson } from '../shared/api-client.js';
 
 const AUTH_API_URL = PROXY_CONFIG.authAPI.baseURL;
 
 export async function registerUser(email, password) {
     try {
-        const response = await fetch(`${AUTH_API_URL}/api/auth/register`, {
+        const { data } = await requestJson(`${AUTH_API_URL}/api/auth/register`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ email, password })
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Registration failed');
-        }
-        
-        const data = await response.json();
+        }, 'Registration failed');
         return data;
     } catch (error) {
         console.error('Registration error:', error);
@@ -28,20 +21,13 @@ export async function registerUser(email, password) {
 
 export async function verifyEmail(email, code) {
     try {
-        const response = await fetch(`${AUTH_API_URL}/api/auth/verify-email`, {
+        const { data } = await requestJson(`${AUTH_API_URL}/api/auth/verify-email`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ email, code })
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Verification failed');
-        }
-        
-        const data = await response.json();
+        }, 'Verification failed');
         
         await chrome.storage.local.set({ 
             jwtToken: data.token,
@@ -58,20 +44,13 @@ export async function verifyEmail(email, code) {
 
 export async function loginUser(email, password) {
     try {
-        const response = await fetch(`${AUTH_API_URL}/api/auth/login`, {
+        const { data } = await requestJson(`${AUTH_API_URL}/api/auth/login`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ email, password })
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Login failed');
-        }
-        
-        const data = await response.json();
+        }, 'Login failed');
         
         await chrome.storage.local.set({ 
             jwtToken: data.token,
@@ -93,21 +72,13 @@ export async function verifyToken(token) {
             return false;
         }
         
-        
-        const response = await fetch(`${AUTH_API_URL}/api/auth/verify`, {
+        const { data } = await requestJson(`${AUTH_API_URL}/api/auth/verify`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             }
-        });
-        
-        if (!response.ok) {
-            console.warn('[Auth API] Токен невалиден или истек');
-            return false;
-        }
-        
-        const data = await response.json();
+        }, 'Token verification failed');
         
         await chrome.storage.local.set({ 
             user: data,
@@ -123,18 +94,12 @@ export async function verifyToken(token) {
 
 export async function getCurrentUser(token) {
     try {
-        const response = await fetch(`${AUTH_API_URL}/api/auth/me`, {
+        const { data } = await requestJson(`${AUTH_API_URL}/api/auth/me`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${token}`
             }
-        });
-        
-        if (!response.ok) {
-            throw new Error('Failed to get user info');
-        }
-        
-        const data = await response.json();
+        }, 'Failed to get user info');
         return data;
     } catch (error) {
         console.error('Get user error:', error);

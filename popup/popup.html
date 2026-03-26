@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VPS Connect</title>
+    <link rel="icon" type="image/png" href="../icons/icon48.png">
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -12,10 +13,7 @@
         <!-- Header -->
         <div class="header">
             <div class="logo">
-                <svg width="28" height="28" viewBox="0 0 128 128">
-                    <circle cx="64" cy="64" r="60" fill="#4285F4"/>
-                    <text x="64" y="84" font-family="Arial, sans-serif" font-size="70" text-anchor="middle" fill="white" font-weight="bold">P</text>
-                </svg>
+                <img src="../icons/icon48.png" alt="VPS Connect logo" width="28" height="28">
             </div>
             <h1>VPS Connect</h1>
             <div class="info">
@@ -85,7 +83,7 @@
             <!-- Email Verification Form -->
             <div id="verify-form" class="tab-content">
                 <div class="verify-info">
-                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#4285F4" stroke-width="2">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--brand-primary)" stroke-width="2">
                         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
                         <polyline points="22,6 12,13 2,6"/>
                     </svg>
@@ -154,7 +152,7 @@
                 <!-- Active Subscription -->
                 <div class="subscription-active hidden" id="subscription-active">
                     <div class="subscription-status">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" stroke-width="2">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand-success)" stroke-width="2">
                             <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                             <polyline points="22 4 12 14.01 9 11.01"/>
                         </svg>
@@ -176,10 +174,10 @@
                 <!-- No Subscription -->
                 <div class="subscription-inactive" id="subscription-inactive">
                     <div class="subscription-message">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FF9800" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--brand-warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"/>
                             <line x1="12" y1="7" x2="12" y2="13"/>
-                            <circle cx="12" cy="17" r="1" fill="#FF9800" stroke="#FF9800"/>
+                            <circle cx="12" cy="17" r="1" fill="var(--brand-warning)" stroke="var(--brand-warning)"/>
                         </svg>
                         <p>У вас нет активной подписки</p>
                         <small>Оформите подписку для доступа к VPS серверу</small>
@@ -258,20 +256,13 @@
                 <div class="url-whitelist hidden" id="url-whitelist-section">
                     <div class="whitelist-header">
                         <span class="label">Список сайтов:</span>
-                        <button id="add-url-btn" class="btn-icon" title="Добавить сайт">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="12" y1="5" x2="12" y2="19"/>
-                                <line x1="5" y1="12" x2="19" y2="12"/>
-                            </svg>
-                        </button>
                     </div>
                     
                     <!-- Add URL Form -->
-                    <div class="add-url-form hidden" id="add-url-form">
+                    <div class="add-url-form" id="add-url-form">
                         <input type="text" id="url-input" placeholder="example.com или *.example.com" class="input-field">
                         <div class="form-buttons">
                             <button id="save-url-btn" class="btn btn-primary btn-small">Добавить</button>
-                            <button id="cancel-url-btn" class="btn btn-secondary btn-small">Отмена</button>
                         </div>
                     </div>
                     
