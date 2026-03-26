@@ -1,5 +1,6 @@
 
 import { PROXY_CONFIG } from '../background/proxy-config.js';
+import { parseJsonResponse, requestJson } from '../shared/api-client.js';
 
 // API Configuration
 const API_BASE_URL = `${PROXY_CONFIG.authAPI.baseURL}/api`;
@@ -40,11 +41,9 @@ const logoutBtn = document.getElementById('logout-btn');
 const modeAll = document.getElementById('mode-all');
 const modeWhitelist = document.getElementById('mode-whitelist');
 const whitelistSection = document.getElementById('url-whitelist-section');
-const addUrlBtn = document.getElementById('add-url-btn');
 const addUrlForm = document.getElementById('add-url-form');
 const urlInput = document.getElementById('url-input');
 const saveUrlBtn = document.getElementById('save-url-btn');
-const cancelUrlBtn = document.getElementById('cancel-url-btn');
 const urlList = document.getElementById('url-list');
 
 // Error messages
@@ -71,6 +70,7 @@ const planOptions = document.querySelectorAll('.plan-option');
 // Store email for verification
 let pendingVerificationEmail = null;
 let selectedPeriod = 3; // Default: 3 months
+let transientBannerTimer = null;
 
 const AUTH_STATE_KEY = 'auth_flow_state';
 const TTL_MS = 5 * 60 * 1000;
@@ -106,6 +106,75 @@ function closeForgotPasswordModal() {
     forgotPasswordModal.classList.add('hidden');
 }
 
+function hideNotificationBanner() {
+    if (!notificationBanner) return;
+    notificationBanner.classList.add('hidden');
+    notificationBanner.removeAttribute('data-temporary');
+}
+
+function showNotificationBanner(notification, options = {}) {
+    if (!notification || !notificationBanner || !notificationText) return;
+
+    const timeoutMs = options.timeoutMs ?? 0;
+
+    if (transientBannerTimer) {
+        clearTimeout(transientBannerTimer);
+        transientBannerTimer = null;
+    }
+
+    notificationBanner.className = 'notification-banner';
+    notificationBanner.classList.add(notification.type || 'info');
+    notificationText.textContent = notification.message;
+    notificationBanner.classList.remove('hidden');
+
+    if (timeoutMs > 0) {
+        notificationBanner.dataset.temporary = 'true';
+        transientBannerTimer = setTimeout(() => {
+            hideNotificationBanner();
+        }, timeoutMs);
+    }
+}
+
+function showTransientMessage(message, type = 'info', timeoutMs = 3500) {
+    showNotificationBanner({ message, type }, { timeoutMs });
+}
+
+function setButtonBusy(button, isBusy, busyLabel = null) {
+    if (!button) return;
+
+    if (isBusy) {
+        if (!button.dataset.originalText) {
+            const labelNode = button.querySelector('span');
+            button.dataset.originalText = labelNode ? labelNode.textContent : button.textContent.trim();
+        }
+
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+
+        if (busyLabel) {
+            const labelNode = button.querySelector('span');
+            if (labelNode) {
+                labelNode.textContent = busyLabel;
+            } else {
+                button.textContent = busyLabel;
+            }
+        }
+        return;
+    }
+
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+
+    if (button.dataset.originalText) {
+        const labelNode = button.querySelector('span');
+        if (labelNode) {
+            labelNode.textContent = button.dataset.originalText;
+        } else {
+            button.textContent = button.dataset.originalText;
+        }
+    }
+}
+
 /**
  * Handle forgot password submit
  */
@@ -135,7 +204,7 @@ async function handleForgotPassword(e) {
 
         if (response.ok) {
             await savePendingPasswordResetEmail(email);
-            alert('Если такой email зарегистрирован, мы отправили туда временный пароль.');
+            showTransientMessage('Если такой email зарегистрирован, временный пароль уже отправлен.', 'success');
             closeForgotPasswordModal();
         } else {
             console.error('[Popup] Forgot password error status:', response.status);
@@ -211,7 +280,7 @@ async function handleForceChangePassword(e) {
 
         if (response.ok) {
             await clearPendingPasswordReset();
-            alert('Пароль успешно изменён!');
+            showTransientMessage('Пароль успешно изменён.', 'success');
             forceChangePasswordForm.reset();
             await showDashboard();
         } else {
@@ -338,21 +407,6 @@ async function fetchNotifications() {
     }
 }
 
-// Show notification banner
-function showNotificationBanner(notification) {
-    if (!notification || !notificationBanner || !notificationText) return;
-    
-    // Set type class (info, warning, error, success)
-    notificationBanner.className = 'notification-banner';
-    notificationBanner.classList.add(notification.type || 'info');
-    
-    // Set text
-    notificationText.textContent = notification.message;
-    
-    // Show banner
-    notificationBanner.classList.remove('hidden');
-}
-
 // Load and display notifications
 async function loadNotifications() {
     const data = await fetchNotifications();
@@ -390,6 +444,23 @@ async function init() {
     
     // Setup event listeners
     setupEventListeners();
+}
+
+async function syncWhitelistFromServer() {
+    try {
+        const serverUrls = await fetchServerWhitelist();
+        if (serverUrls && Array.isArray(serverUrls)) {
+            const normalizedUrls = normalizeWhitelist(serverUrls);
+            await chrome.storage.local.set({ urlWhitelist: normalizedUrls });
+            try {
+                await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: normalizedUrls });
+            } catch (err) {
+                console.error('[Popup] Error sending updateWhitelist after server sync:', err);
+            }
+        }
+    } catch (e) {
+        console.warn('[Popup] Failed to sync whitelist from server, using local cache', e);
+    }
 }
 
 /**
@@ -438,9 +509,13 @@ function setupEventListeners() {
     modeWhitelist.addEventListener('change', handleModeChange);
     
     // URL whitelist management
-    addUrlBtn.addEventListener('click', showAddUrlForm);
     saveUrlBtn.addEventListener('click', handleAddUrl);
-    cancelUrlBtn.addEventListener('click', hideAddUrlForm);
+    urlInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            handleAddUrl();
+        }
+    });
     
     // Subscription management
     buySubscriptionBtn.addEventListener('click', handleBuySubscription);
@@ -502,58 +577,39 @@ async function handleLogin(e) {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        const { data } = await requestJson(`${API_BASE_URL}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
-        });
-        
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('[Popup] Не JSON ответ:', text);
-            throw new Error(`Сервер вернул ${response.status}: ${text.substring(0, 100)}`);
-        }
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            // Save token
-            await saveToken(data.token);
-            await saveUser(data.user);
+        }, 'Ошибка входа');
 
-            // Check if this login follows a password reset request
-            const pending = await getPendingPasswordReset();
-            if (pending.email && pending.email === email) {
-                // Treat entered password as temporary password for change-password flow
-                await savePendingTempPassword(password);
-                await showForceChangePasswordView();
-            } else {
-                // Show dashboard
-                await showDashboard();
-                
-                // Автоматически включаем VPS подключение после логина
-                const proxyEnabled = await getProxyStatus();
-                if (!proxyEnabled) {
-                    try {
-                        const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
-                        if (response.success) {
-                            updateProxyStatus(response.enabled);
-                        }
-                    } catch (error) {
-                        console.error('[Popup] Failed to auto-enable proxy after login:', error);
+        await saveToken(data.token);
+        await saveUser(data.user);
+
+        const pending = await getPendingPasswordReset();
+        if (pending.email && pending.email === email) {
+            await savePendingTempPassword(password);
+            await showForceChangePasswordView();
+        } else {
+            await showDashboard();
+
+            const proxyEnabled = await getProxyStatus();
+            if (!proxyEnabled) {
+                try {
+                    const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
+                    if (response.success) {
+                        updateProxyStatus(response.enabled);
                     }
+                } catch (error) {
+                    console.error('[Popup] Failed to auto-enable proxy after login:', error);
                 }
             }
-            
-            // Reset form
-            loginForm.reset();
-        } else {
-            showError(loginError, data.error || 'Ошибка входа');
         }
+
+        loginForm.reset();
     } catch (error) {
         console.error('[Popup] Login error:', error);
-        showError(loginError, 'Не удалось подключиться к серверу');
+        showError(loginError, error.message || 'Не удалось подключиться к серверу');
     } finally {
         hideLoading();
     }
@@ -586,33 +642,20 @@ async function handleRegister(e) {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        const { data } = await requestJson(`${API_BASE_URL}/auth/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
-        });
-        
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('[Popup] Не JSON ответ:', text);
-            throw new Error(`Сервер вернул ${response.status}: ${text.substring(0, 100)}`);
-        }
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            pendingVerificationEmail = email;
-            document.getElementById('verify-email-display').textContent = email;
-            await saveAuthState({ step: 'verify', email });
-            registerForm.reset();
-            switchTab('verify');
-        } else {
-            showError(registerError, data.error || 'Ошибка регистрации');
-        }
+        }, 'Ошибка регистрации');
+
+        pendingVerificationEmail = email;
+        document.getElementById('verify-email-display').textContent = email;
+        await saveAuthState({ step: 'verify', email });
+        registerForm.reset();
+        switchTab('verify');
     } catch (error) {
         console.error('[Popup] Register error:', error);
-        showError(registerError, 'Не удалось подключиться к серверу');
+        showError(registerError, error.message || 'Не удалось подключиться к серверу');
     } finally {
         hideLoading();
     }
@@ -643,25 +686,19 @@ async function handleVerifyEmail(e) {
                 code: code 
             })
         });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            await saveToken(data.token);
-            await saveUser(data.user);
-            
-            pendingVerificationEmail = null;
-            await clearAuthState();
-            
-            await showDashboard();
-            
-            verifyForm.reset();
-        } else {
-            showError(verifyError, data.error || 'Неверный код. Проверьте код из письма.');
-        }
+
+        const data = await parseJsonResponse(response, 'Неверный код. Проверьте код из письма.');
+        await saveToken(data.token);
+        await saveUser(data.user);
+
+        pendingVerificationEmail = null;
+        await clearAuthState();
+
+        await showDashboard();
+        verifyForm.reset();
     } catch (error) {
         console.error('[Popup] Verification error:', error);
-        showError(verifyError, 'Не удалось подключиться к серверу');
+        showError(verifyError, error.message || 'Не удалось подключиться к серверу');
     } finally {
         hideLoading();
     }
@@ -671,18 +708,31 @@ async function handleVerifyEmail(e) {
  * Handle toggle proxy
  */
 async function handleToggleProxy() {
+    setButtonBusy(toggleProxyBtn, true, 'Подключение...');
     try {
-        // Send message to background script
         const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
         
         if (response.success) {
-            updateProxyStatus(response.enabled);
+            const runtimeStatus = await getRuntimeProxyStatus();
+            updateProxyStatus(response.enabled, runtimeStatus.detail);
+            showTransientMessage(
+                response.enabled ? 'Прокси включён.' : 'Прокси отключён.',
+                response.enabled ? 'success' : 'info'
+            );
         } else {
-            alert('Ошибка подключения: ' + (response.error || 'Unknown error'));
+            showNotificationBanner({
+                type: 'error',
+                message: `Ошибка подключения: ${response.error || 'Unknown error'}`
+            });
         }
     } catch (error) {
         console.error('[Popup] Toggle proxy error:', error);
-        alert('Ошибка: ' + error.message);
+        showNotificationBanner({
+            type: 'error',
+            message: `Ошибка: ${error.message}`
+        });
+    } finally {
+        setButtonBusy(toggleProxyBtn, false);
     }
 }
 
@@ -735,33 +785,17 @@ async function showDashboard() {
     }
     
     // Load proxy status
-    const proxyEnabled = await getProxyStatus();
-    updateProxyStatus(proxyEnabled);
+    const runtimeStatus = await getRuntimeProxyStatus();
+    updateProxyStatus(runtimeStatus.enabled, runtimeStatus.detail);
     
     // Update proxy info
     proxyServerEl.textContent = PROXY_CONFIG.host;
     
     // Load proxy mode and whitelist
     await loadProxyMode();
-    
-    // Try to fetch server whitelist for this user and sync local state
-    try {
-        const serverUrls = await fetchServerWhitelist();
-        if (serverUrls && Array.isArray(serverUrls)) {
-            await chrome.storage.local.set({ urlWhitelist: serverUrls });
-            await loadUrlWhitelist();
-            try {
-                await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: serverUrls });
-            } catch (err) {
-                console.error('[Popup] Error sending updateWhitelist after server sync:', err);
-            }
-        } else {
-            await loadUrlWhitelist();
-        }
-    } catch (e) {
-        console.warn('[Popup] Failed to sync whitelist from server, using local cache', e);
-        await loadUrlWhitelist();
-    }
+
+    await syncWhitelistFromServer();
+    await loadUrlWhitelist();
     
     // Load subscription info
     await loadSubscription();
@@ -778,7 +812,7 @@ async function showForceChangePasswordView() {
 /**
  * Update proxy status UI
  */
-function updateProxyStatus(enabled) {
+function updateProxyStatus(enabled, detailMessage = null) {
     const statusIndicator = proxyStatusEl.querySelector('.status-indicator');
     const statusText = proxyStatusEl.querySelector('span:last-child');
     const toggleIcon = toggleProxyBtn.querySelector('svg path');
@@ -861,6 +895,27 @@ async function getProxyStatus() {
     return result.proxyEnabled || false;
 }
 
+async function getRuntimeProxyStatus() {
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'getStatus' });
+        if (!response?.success || !response.data) {
+            return { enabled: await getProxyStatus(), detail: 'Статус доступен частично.' };
+        }
+
+        const { enabled, mode } = response.data;
+
+        if (enabled) {
+            const modeLabel = mode === 'whitelist' ? 'режим: выбранные сайты' : 'режим: все сайты';
+            return { enabled, detail: `Подключено, ${modeLabel}.` };
+        }
+
+        return { enabled, detail: 'Используется прямое подключение.' };
+    } catch (error) {
+        console.warn('[Popup] Failed to query runtime proxy status:', error);
+        return { enabled: await getProxyStatus(), detail: 'Не удалось получить состояние фонового процесса.' };
+    }
+}
+
 /**
  * Proxy Mode & Whitelist Management
  */
@@ -874,7 +929,6 @@ async function getProxyMode() {
 // Save proxy mode
 async function saveProxyMode(mode) {
     await chrome.storage.local.set({ proxyMode: mode });
-    // Notify background script to update proxy config
     try {
         await chrome.runtime.sendMessage({ action: 'updateProxyMode', mode });
     } catch (error) {
@@ -890,9 +944,24 @@ async function getUrlWhitelist() {
 
 // Save URL whitelist
 async function saveUrlWhitelist(urls) {
-    await chrome.storage.local.set({ urlWhitelist: urls });
-    // Push changes to backend
-    await pushServerWhitelist(urls);
+    const normalizedUrls = normalizeWhitelist(urls);
+    await chrome.storage.local.set({ urlWhitelist: normalizedUrls });
+
+    try {
+        await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: normalizedUrls });
+    } catch (error) {
+        console.error('[Popup] Error sending updateWhitelist message:', error);
+    }
+
+    const pushed = await pushServerWhitelist(normalizedUrls);
+    if (!pushed) {
+        showNotificationBanner({
+            type: 'warning',
+            message: 'Локальный список сохранён, но серверную копию обновить не удалось.'
+        });
+    }
+
+    return normalizedUrls;
 }
 
 // Fetch user's whitelist from backend
@@ -951,6 +1020,9 @@ async function pushServerWhitelist(urls) {
 async function handleModeChange(e) {
     const mode = e.target.value;
     await saveProxyMode(mode);
+
+    const runtimeStatus = await getRuntimeProxyStatus();
+    updateProxyStatus(runtimeStatus.enabled, runtimeStatus.detail);
     
     // Show/hide whitelist section
     if (mode === 'whitelist') {
@@ -971,68 +1043,62 @@ async function loadProxyMode() {
     } else {
         modeWhitelist.checked = true;
         whitelistSection.classList.remove('hidden');
-        // Try to fetch server whitelist for this user and sync local state
-        try {
-            const serverUrls = await fetchServerWhitelist();
-            if (serverUrls && Array.isArray(serverUrls)) {
-                await chrome.storage.local.set({ urlWhitelist: serverUrls });
-                await loadUrlWhitelist();
-                try {
-                    await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: serverUrls });
-                } catch (err) {
-                    console.error('[Popup] Error sending updateWhitelist after server sync:', err);
-                }
-            } else {
-                await loadUrlWhitelist();
-            }
-        } catch (e) {
-            console.warn('[Popup] Failed to sync whitelist from server, using local cache', e);
-            await loadUrlWhitelist();
-        }
     }
 }
 
-// Show add URL form
-function showAddUrlForm() {
-    addUrlForm.classList.remove('hidden');
+function resetUrlForm() {
+    urlInput.value = '';
     urlInput.focus();
 }
 
-// Hide add URL form
-function hideAddUrlForm() {
-    addUrlForm.classList.add('hidden');
-    urlInput.value = '';
-}
-
-// Normalize URL - extract domain from full URL
 function normalizeUrl(url) {
-    url = url.trim();
-    
-    // If it's a wildcard pattern, return as is
-    if (url.startsWith('*.')) {
-        return url.toLowerCase();
+    if (!url) return '';
+
+    let normalized = url.trim().toLowerCase();
+    if (!normalized) return '';
+
+    const hasWildcardPrefix = normalized.startsWith('*.');
+    const wildcardPrefix = hasWildcardPrefix ? '*.' : '';
+
+    if (hasWildcardPrefix) {
+        normalized = normalized.slice(2);
     }
-    
-    // If it's a full URL with protocol, extract domain
-    if (url.startsWith('http://') || url.startsWith('https://')) {
+
+    if (normalized.startsWith('http://') || normalized.startsWith('https://')) {
         try {
-            const urlObj = new URL(url);
-            let hostname = urlObj.hostname.toLowerCase();
-            return hostname;
+            normalized = new URL(normalized).hostname.toLowerCase();
         } catch (e) {
-            // If URL parsing fails, try to extract manually
-            const match = url.match(/https?:\/\/([^\/]+)/);
+            const match = normalized.match(/^https?:\/\/([^/?#]+)/);
             if (match) {
-                let hostname = match[1].toLowerCase();
-                return hostname;
+                normalized = match[1].toLowerCase();
             }
         }
     }
-    
-    // Remove trailing slash and path
-    url = url.replace(/\/.*$/, '').toLowerCase();
-    
-    return url;
+
+    normalized = normalized
+        .replace(/^[^a-z0-9*.-]+/i, '')
+        .replace(/[:/?#].*$/, '')
+        .replace(/\.+$/, '');
+
+    if (!normalized) return '';
+    return `${wildcardPrefix}${normalized}`;
+}
+
+function normalizeWhitelist(urls) {
+    const uniqueUrls = [];
+    const seen = new Set();
+
+    for (const rawUrl of urls || []) {
+        const normalized = normalizeUrl(rawUrl);
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+
+        seen.add(normalized);
+        uniqueUrls.push(normalized);
+    }
+
+    return uniqueUrls;
 }
 
 // Handle add URL
@@ -1040,63 +1106,50 @@ async function handleAddUrl() {
     const url = urlInput.value.trim();
     
     if (!url) {
-        alert('Введите URL');
+        showNotificationBanner({ type: 'warning', message: 'Введите URL или домен.' });
         return;
     }
     
-    // Validate URL format
     if (!isValidUrlPattern(url)) {
-        alert('Неверный формат URL. Примеры:\n- example.com\n- *.example.com\n- https://example.com/*');
+        showNotificationBanner({
+            type: 'warning',
+            message: 'Неверный формат URL. Примеры: example.com, *.example.com, https://example.com/*'
+        });
         return;
     }
     
-    // Normalize URL - extract domain
     const normalizedUrl = normalizeUrl(url);
     
     if (!normalizedUrl) {
-        alert('Не удалось извлечь домен из URL');
+        showNotificationBanner({ type: 'warning', message: 'Не удалось извлечь домен из URL.' });
         return;
     }
     
-    // Get current whitelist
     const whitelist = await getUrlWhitelist();
     
-    // Check if already exists (normalized)
     if (whitelist.some(w => normalizeUrl(w) === normalizedUrl)) {
-        alert('Этот домен уже добавлен');
+        showTransientMessage('Этот домен уже есть в списке.', 'info');
         return;
     }
     
-    // Get related domains for popular sites
     const relatedDomains = getRelatedDomains(normalizedUrl);
-    
-    // Add normalized URL
-    whitelist.push(normalizedUrl);
-    
-    // Add related domains if any
-    if (relatedDomains.length > 0) {
-        // Don't normalize when checking - wildcards should be preserved
-        for (const domain of relatedDomains) {
-            if (!whitelist.includes(domain)) {
-                whitelist.push(domain);
-            }
-        }
-        
-        // Дополнительные домены добавлены без логирования
-    }
-    
-    await saveUrlWhitelist(whitelist);
-    
-    // Update UI
-    hideAddUrlForm();
-    await loadUrlWhitelist();
-    
-    // ALWAYS notify background to update whitelist, regardless of proxy state
-    // This ensures PAC script is regenerated when whitelist changes
+
+    setButtonBusy(saveUrlBtn, true, 'Сохраняем...');
     try {
-        await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: whitelist });
-    } catch (error) {
-        console.error('[Popup] Error sending updateWhitelist message:', error);
+        const nextWhitelist = normalizeWhitelist([...whitelist, normalizedUrl, ...relatedDomains]);
+        const savedWhitelist = await saveUrlWhitelist(nextWhitelist);
+
+        resetUrlForm();
+        await loadUrlWhitelist();
+
+        const relatedCount = Math.max(savedWhitelist.length - whitelist.length - 1, 0);
+        if (relatedCount > 0) {
+            showTransientMessage(`Сайт добавлен. Автоматически добавлено ещё ${relatedCount} связанных доменов.`, 'success', 5000);
+        } else {
+            showTransientMessage('Сайт добавлен в список.', 'success');
+        }
+    } finally {
+        setButtonBusy(saveUrlBtn, false);
     }
 }
 
@@ -1161,48 +1214,64 @@ function isValidUrlPattern(url) {
 // Load and display URL whitelist
 async function loadUrlWhitelist() {
     const whitelist = await getUrlWhitelist();
-    
+
+    urlList.replaceChildren();
+
     if (whitelist.length === 0) {
-        urlList.innerHTML = '<div class="empty-state">Нет добавленных сайтов</div>';
+        const emptyState = document.createElement('div');
+        emptyState.className = 'empty-state';
+        emptyState.textContent = 'Нет добавленных сайтов';
+        urlList.appendChild(emptyState);
         return;
     }
-    
-    urlList.innerHTML = whitelist.map(url => `
-        <div class="url-item">
-            <span class="url-item-text">${url}</span>
-            <button class="url-item-remove" data-url="${url}">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-            </button>
-        </div>
-    `).join('');
-    
-    // Add click handlers for remove buttons
-    const removeButtons = urlList.querySelectorAll('.url-item-remove');
-    removeButtons.forEach(btn => {
-        btn.addEventListener('click', () => handleRemoveUrl(btn.dataset.url));
-    });
+
+    for (const url of whitelist) {
+        const item = document.createElement('div');
+        item.className = 'url-item';
+
+        const text = document.createElement('span');
+        text.className = 'url-item-text';
+        text.textContent = url;
+
+        const button = document.createElement('button');
+        button.className = 'url-item-remove';
+        button.type = 'button';
+        button.setAttribute('aria-label', `Удалить ${url}`);
+        button.addEventListener('click', () => handleRemoveUrl(url));
+
+        const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('width', '16');
+        icon.setAttribute('height', '16');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('fill', 'none');
+        icon.setAttribute('stroke', 'currentColor');
+        icon.setAttribute('stroke-width', '2');
+
+        const line1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line1.setAttribute('x1', '18');
+        line1.setAttribute('y1', '6');
+        line1.setAttribute('x2', '6');
+        line1.setAttribute('y2', '18');
+
+        const line2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line2.setAttribute('x1', '6');
+        line2.setAttribute('y1', '6');
+        line2.setAttribute('x2', '18');
+        line2.setAttribute('y2', '18');
+
+        icon.append(line1, line2);
+        button.appendChild(icon);
+        item.append(text, button);
+        urlList.appendChild(item);
+    }
 }
 
-// Handle remove URL
 async function handleRemoveUrl(url) {
-    if (!confirm(`Удалить "${url}" из списка?`)) {
-        return;
-    }
-    
     const whitelist = await getUrlWhitelist();
-    const filtered = whitelist.filter(u => u !== url);
+    const filtered = normalizeWhitelist(whitelist.filter(u => u !== url));
     await saveUrlWhitelist(filtered);
     await loadUrlWhitelist();
-    
-    // Notify background to update whitelist
-    try {
-        await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: filtered });
-    } catch (error) {
-        console.error('[Popup] Error sending updateWhitelist message:', error);
-    }
+    showTransientMessage(`"${url}" удалён из списка.`, 'info');
 }
 
 /**
@@ -1232,12 +1301,11 @@ async function loadSubscription() {
         } else {
             showNoSubscription();
         }
-        
-        // Load pricing
-        await loadPricing();
     } catch (error) {
         console.error('[Popup] Error loading subscription:', error);
         showNoSubscription();
+    } finally {
+        await loadPricing();
     }
 }
 
@@ -1301,10 +1369,12 @@ function showNoSubscription() {
  * Handle buy/extend subscription
  */
 async function handleBuySubscription() {
+    setButtonBusy(buySubscriptionBtn, true, 'Создание...');
+    setButtonBusy(extendSubscriptionBtn, true, 'Создание...');
     try {
         const token = await getToken();
         if (!token) {
-            alert('Необходима авторизация');
+            showNotificationBanner({ type: 'warning', message: 'Необходима авторизация.' });
             return;
         }
         
@@ -1349,7 +1419,10 @@ async function handleBuySubscription() {
                 errorMessage = text.substring(0, 200);
             }
             
-            alert('Ошибка создания платежа: ' + errorMessage);
+            showNotificationBanner({
+                type: 'error',
+                message: `Ошибка создания платежа: ${errorMessage}`
+            });
             return;
         }
         
@@ -1358,16 +1431,26 @@ async function handleBuySubscription() {
         // Open payment URL in new tab
         if (payment.confirmation_url) {
             chrome.tabs.create({ url: payment.confirmation_url });
-            
-            // Show success message
-            alert(`Платеж создан!\nСумма: ${payment.amount} ₽\nПериод: ${payment.period} мес.\n\nСтраница оплаты откроется в новой вкладке.`);
+            showNotificationBanner({
+                type: 'success',
+                message: `Платёж создан: ${payment.amount} ₽ за ${payment.period} мес. Страница оплаты открыта в новой вкладке.`
+            });
         } else {
-            alert('Ошибка: не получена ссылка на оплату');
+            showNotificationBanner({
+                type: 'error',
+                message: 'Ошибка: не получена ссылка на оплату.'
+            });
         }
     } catch (error) {
         hideLoading();
         console.error('[Popup] Error creating payment:', error);
-        alert('Ошибка при создании платежа: ' + error.message);
+        showNotificationBanner({
+            type: 'error',
+            message: `Ошибка при создании платежа: ${error.message}`
+        });
+    } finally {
+        setButtonBusy(buySubscriptionBtn, false);
+        setButtonBusy(extendSubscriptionBtn, false);
     }
 }
 
