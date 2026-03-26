@@ -10,16 +10,62 @@ class ProxyManager {
     this.init();
   }
 
+  setupStorageListener() {
+    chrome.storage.onChanged.addListener(async (changes, area) => {
+      if (area !== 'local') {
+        return;
+      }
+
+      if (changes.proxyEnabled) {
+        this.isEnabled = changes.proxyEnabled.newValue;
+        if (this.isEnabled) {
+          const result = await chrome.storage.local.get('jwtToken');
+          if (!result.jwtToken) {
+            this.isEnabled = false;
+            await chrome.storage.local.set({ proxyEnabled: false });
+            await this.disableProxy();
+            return;
+          }
+          await this.enableProxy();
+        } else {
+          await this.disableProxy();
+        }
+      }
+
+      if (changes.proxyMode) {
+        this.proxyMode = changes.proxyMode.newValue;
+        if (this.isEnabled) {
+          await this.enableProxy();
+        }
+      }
+
+      if (changes.urlWhitelist) {
+        this.urlWhitelist = changes.urlWhitelist.newValue || [];
+        this.updateWhitelistCache(this.urlWhitelist);
+        if (this.isEnabled && this.proxyMode === 'whitelist') {
+          await this.enableProxy();
+        }
+      }
+
+      if (changes.jwtToken && !changes.jwtToken.newValue) {
+        this.isEnabled = false;
+        await chrome.storage.local.set({ proxyEnabled: false });
+        await this.disableProxy();
+      }
+    });
+  }
+
   async init() {
     try {
+      this.setupStorageListener();
+
       const result = await chrome.storage.local.get(['proxyEnabled', 'proxyMode', 'urlWhitelist', 'jwtToken']);
       this.isEnabled = result.proxyEnabled ?? PROXY_CONFIG.autoEnable;
       this.proxyMode = result.proxyMode ?? 'all';
       this.urlWhitelist = result.urlWhitelist ?? [];
       this.updateWhitelistCache(this.urlWhitelist);
 
-      const REQUIRE_AUTH = true;
-      if (REQUIRE_AUTH && !result.jwtToken) {
+      if (!result.jwtToken) {
         this.isEnabled = false;
         await chrome.storage.local.set({ proxyEnabled: false });
         await this.disableProxy();
@@ -31,51 +77,6 @@ class ProxyManager {
       } else {
         await this.disableProxy();
       }
-      
-      chrome.storage.onChanged.addListener(async (changes, area) => {
-        if (area === 'local') {
-          if (changes.proxyEnabled) {
-            this.isEnabled = changes.proxyEnabled.newValue;
-            if (this.isEnabled) {
-              const REQUIRE_AUTH = true;
-              if (REQUIRE_AUTH) {
-                const result = await chrome.storage.local.get('jwtToken');
-                if (!result.jwtToken) {
-                  this.isEnabled = false;
-                  await chrome.storage.local.set({ proxyEnabled: false });
-                  await this.disableProxy();
-                  return;
-                }
-              }
-              await this.enableProxy();
-            } else {
-              await this.disableProxy();
-            }
-          }
-          
-          if (changes.proxyMode) {
-            this.proxyMode = changes.proxyMode.newValue;
-            if (this.isEnabled) {
-              await this.enableProxy();
-            }
-          }
-          
-          if (changes.urlWhitelist) {
-            this.urlWhitelist = changes.urlWhitelist.newValue || [];
-            this.updateWhitelistCache(this.urlWhitelist);
-            if (this.isEnabled && this.proxyMode === 'whitelist') {
-              await this.enableProxy();
-            }
-          }
-          
-          if (changes.jwtToken && !changes.jwtToken.newValue) {
-            this.isEnabled = false;
-            await chrome.storage.local.set({ proxyEnabled: false });
-            await this.disableProxy();
-          }
-        }
-      });
-      
     } catch (error) {
       console.error('[ProxyManager] Ошибка инициализации:', error);
     }

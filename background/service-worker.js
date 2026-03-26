@@ -133,13 +133,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           break;
           
         case 'toggleProxy':
+          if (proxyManager.isEnabled) {
+            const disabledState = await proxyManager.toggleProxy();
+            sendResponse({ success: true, enabled: disabledState });
+            break;
+          }
+
           const isAuth = await isAuthenticated();
-          
           if (!isAuth) {
             sendResponse({ success: false, error: 'Требуется авторизация' });
             break;
           }
-          
+
           const newState = await proxyManager.toggleProxy();
           sendResponse({ success: true, enabled: newState });
           break;

@@ -1,5 +1,6 @@
 
 import { PROXY_CONFIG } from '../background/proxy-config.js';
+import { parseJsonResponse, requestJson } from '../shared/api-client.js';
 
 // API Configuration
 const API_BASE_URL = `${PROXY_CONFIG.authAPI.baseURL}/api`;
@@ -392,6 +393,22 @@ async function init() {
     setupEventListeners();
 }
 
+async function syncWhitelistFromServer() {
+    try {
+        const serverUrls = await fetchServerWhitelist();
+        if (serverUrls && Array.isArray(serverUrls)) {
+            await chrome.storage.local.set({ urlWhitelist: serverUrls });
+            try {
+                await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: serverUrls });
+            } catch (err) {
+                console.error('[Popup] Error sending updateWhitelist after server sync:', err);
+            }
+        }
+    } catch (e) {
+        console.warn('[Popup] Failed to sync whitelist from server, using local cache', e);
+    }
+}
+
 /**
  * Setup event listeners
  */
@@ -502,58 +519,39 @@ async function handleLogin(e) {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        const { data } = await requestJson(`${API_BASE_URL}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
-        });
-        
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('[Popup] Не JSON ответ:', text);
-            throw new Error(`Сервер вернул ${response.status}: ${text.substring(0, 100)}`);
-        }
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            // Save token
-            await saveToken(data.token);
-            await saveUser(data.user);
+        }, 'Ошибка входа');
 
-            // Check if this login follows a password reset request
-            const pending = await getPendingPasswordReset();
-            if (pending.email && pending.email === email) {
-                // Treat entered password as temporary password for change-password flow
-                await savePendingTempPassword(password);
-                await showForceChangePasswordView();
-            } else {
-                // Show dashboard
-                await showDashboard();
-                
-                // Автоматически включаем VPS подключение после логина
-                const proxyEnabled = await getProxyStatus();
-                if (!proxyEnabled) {
-                    try {
-                        const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
-                        if (response.success) {
-                            updateProxyStatus(response.enabled);
-                        }
-                    } catch (error) {
-                        console.error('[Popup] Failed to auto-enable proxy after login:', error);
+        await saveToken(data.token);
+        await saveUser(data.user);
+
+        const pending = await getPendingPasswordReset();
+        if (pending.email && pending.email === email) {
+            await savePendingTempPassword(password);
+            await showForceChangePasswordView();
+        } else {
+            await showDashboard();
+
+            const proxyEnabled = await getProxyStatus();
+            if (!proxyEnabled) {
+                try {
+                    const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
+                    if (response.success) {
+                        updateProxyStatus(response.enabled);
                     }
+                } catch (error) {
+                    console.error('[Popup] Failed to auto-enable proxy after login:', error);
                 }
             }
-            
-            // Reset form
-            loginForm.reset();
-        } else {
-            showError(loginError, data.error || 'Ошибка входа');
         }
+
+        loginForm.reset();
     } catch (error) {
         console.error('[Popup] Login error:', error);
-        showError(loginError, 'Не удалось подключиться к серверу');
+        showError(loginError, error.message || 'Не удалось подключиться к серверу');
     } finally {
         hideLoading();
     }
@@ -586,33 +584,20 @@ async function handleRegister(e) {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        const { data } = await requestJson(`${API_BASE_URL}/auth/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
-        });
-        
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            const text = await response.text();
-            console.error('[Popup] Не JSON ответ:', text);
-            throw new Error(`Сервер вернул ${response.status}: ${text.substring(0, 100)}`);
-        }
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            pendingVerificationEmail = email;
-            document.getElementById('verify-email-display').textContent = email;
-            await saveAuthState({ step: 'verify', email });
-            registerForm.reset();
-            switchTab('verify');
-        } else {
-            showError(registerError, data.error || 'Ошибка регистрации');
-        }
+        }, 'Ошибка регистрации');
+
+        pendingVerificationEmail = email;
+        document.getElementById('verify-email-display').textContent = email;
+        await saveAuthState({ step: 'verify', email });
+        registerForm.reset();
+        switchTab('verify');
     } catch (error) {
         console.error('[Popup] Register error:', error);
-        showError(registerError, 'Не удалось подключиться к серверу');
+        showError(registerError, error.message || 'Не удалось подключиться к серверу');
     } finally {
         hideLoading();
     }
@@ -643,25 +628,19 @@ async function handleVerifyEmail(e) {
                 code: code 
             })
         });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            await saveToken(data.token);
-            await saveUser(data.user);
-            
-            pendingVerificationEmail = null;
-            await clearAuthState();
-            
-            await showDashboard();
-            
-            verifyForm.reset();
-        } else {
-            showError(verifyError, data.error || 'Неверный код. Проверьте код из письма.');
-        }
+
+        const data = await parseJsonResponse(response, 'Неверный код. Проверьте код из письма.');
+        await saveToken(data.token);
+        await saveUser(data.user);
+
+        pendingVerificationEmail = null;
+        await clearAuthState();
+
+        await showDashboard();
+        verifyForm.reset();
     } catch (error) {
         console.error('[Popup] Verification error:', error);
-        showError(verifyError, 'Не удалось подключиться к серверу');
+        showError(verifyError, error.message || 'Не удалось подключиться к серверу');
     } finally {
         hideLoading();
     }
@@ -743,25 +722,9 @@ async function showDashboard() {
     
     // Load proxy mode and whitelist
     await loadProxyMode();
-    
-    // Try to fetch server whitelist for this user and sync local state
-    try {
-        const serverUrls = await fetchServerWhitelist();
-        if (serverUrls && Array.isArray(serverUrls)) {
-            await chrome.storage.local.set({ urlWhitelist: serverUrls });
-            await loadUrlWhitelist();
-            try {
-                await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: serverUrls });
-            } catch (err) {
-                console.error('[Popup] Error sending updateWhitelist after server sync:', err);
-            }
-        } else {
-            await loadUrlWhitelist();
-        }
-    } catch (e) {
-        console.warn('[Popup] Failed to sync whitelist from server, using local cache', e);
-        await loadUrlWhitelist();
-    }
+
+    await syncWhitelistFromServer();
+    await loadUrlWhitelist();
     
     // Load subscription info
     await loadSubscription();
@@ -971,24 +934,6 @@ async function loadProxyMode() {
     } else {
         modeWhitelist.checked = true;
         whitelistSection.classList.remove('hidden');
-        // Try to fetch server whitelist for this user and sync local state
-        try {
-            const serverUrls = await fetchServerWhitelist();
-            if (serverUrls && Array.isArray(serverUrls)) {
-                await chrome.storage.local.set({ urlWhitelist: serverUrls });
-                await loadUrlWhitelist();
-                try {
-                    await chrome.runtime.sendMessage({ action: 'updateWhitelist', urls: serverUrls });
-                } catch (err) {
-                    console.error('[Popup] Error sending updateWhitelist after server sync:', err);
-                }
-            } else {
-                await loadUrlWhitelist();
-            }
-        } catch (e) {
-            console.warn('[Popup] Failed to sync whitelist from server, using local cache', e);
-            await loadUrlWhitelist();
-        }
     }
 }
 
