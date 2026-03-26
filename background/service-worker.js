@@ -214,6 +214,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 chrome.proxy.onProxyError.addListener((details) => {
   if (!details) {
+<<<<<<< Updated upstream
     console.error('[Service Worker] ❌ Ошибка прокси: неизвестная ошибка');
     return;
   }
@@ -222,6 +223,13 @@ chrome.proxy.onProxyError.addListener((details) => {
   if (typeof details.fatal !== 'undefined') {
     console.error('[Service Worker] Fatal:', details.fatal);
   }
+=======
+    lastProxyError = 'unknown';
+    return;
+  }
+  
+  lastProxyError = details.error || 'unknown';
+>>>>>>> Stashed changes
 });
 
 
