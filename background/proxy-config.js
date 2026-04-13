@@ -11,7 +11,7 @@ const ACTIVE_ENV = 'prod';
 const ENVIRONMENTS = {
   stage: {
     // Proxy server address
-    host: '108.165.174.119',
+    host: '140.235.130.26',
 
     // Proxy server port
     port: 18183,
@@ -27,9 +27,9 @@ const ENVIRONMENTS = {
 
     // Auth API server configuration
     authAPI: {
-      host: '108.165.174.119',
+      host: '140.235.130.26',
       port: 18184,
-      baseURL: 'http://108.165.174.119:18184'
+      baseURL: 'http://140.235.130.26:18184'
     },
 
     // Bypass list - addresses that will NOT be proxied
@@ -43,7 +43,7 @@ const ENVIRONMENTS = {
       '172.16.*',
       '<local>', // Chrome special notation for local addresses
       // Proxy/Auth hosts - do not proxy requests to the server itself
-      '108.165.174.119'
+      '140.235.130.26'
     ],
 
     // Auto-enable proxy on browser startup
@@ -55,7 +55,7 @@ const ENVIRONMENTS = {
   },
 
   prod: {
-    host: '140.235.130.166',
+    host: '108.165.174.119',
     port: 18183,
     scheme: 'http',
     auth: {
@@ -63,9 +63,9 @@ const ENVIRONMENTS = {
       type: 'jwt'
     },
     authAPI: {
-      host: 'vpsconect.online',
-      port: 18433,
-      baseURL: 'https://vpsconect.online:18433'
+      host: '108.165.174.119',
+      port: 18184,
+      baseURL: 'http://108.165.174.119:18184'
     },
     bypassList: [
       'localhost',
@@ -75,8 +75,7 @@ const ENVIRONMENTS = {
       '10.*',
       '172.16.*',
       '<local>',
-      'vpsconect.online',
-      '*.vpsconect.online'
+      '108.165.174.119'
     ],
     autoEnable: false,
     showBadge: true

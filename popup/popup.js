@@ -4,11 +4,34 @@ import { parseJsonResponse, requestJson } from '../shared/api-client.js';
 
 // API Configuration
 const API_BASE_URL = `${PROXY_CONFIG.authAPI.baseURL}/api`;
+const PUBLIC_FEATURES_URL = `${API_BASE_URL}/public/features`;
+const APP_UPDATE_URL = `${API_BASE_URL}/mobile/v1/app/update?version_code=0`;
+const FALLBACK_APK_DOWNLOAD_URL = 'https://www.vpsconect.ru/android_apk.apk';
+const PHONE_DOWNLOAD_CONFIG_URL = 'https://www.vpsconect.ru/phone-downloads.html';
+const PHONE_PLATFORM_ICONS = {
+    android: '../icons/android-platform.png',
+    iphone: '../icons/iphone-platform.png'
+};
 
 // DOM Elements
 const authView = document.getElementById('auth-view');
 const dashboardView = document.getElementById('dashboard-view');
+const apkView = document.getElementById('apk-view');
 const loading = document.getElementById('loading');
+const phoneDownloadBtn = document.getElementById('phone-download-btn');
+const phonePlatformSwitcher = document.getElementById('phone-platform-switcher');
+const phonePlatformBtns = document.querySelectorAll('.phone-platform-btn');
+const phonePlatformTitle = document.getElementById('phone-platform-title');
+const phonePlatformDescription = document.getElementById('phone-platform-description');
+const apkQrCard = document.getElementById('apk-qr-card');
+const apkQrImage = document.getElementById('apk-qr-image');
+const apkDownloadUrl = document.getElementById('apk-download-url');
+const apkDownloadBtn = document.getElementById('apk-download-btn');
+const apkBackBtn = document.getElementById('apk-back-btn');
+const phoneDownloadPlaceholder = document.getElementById('phone-download-placeholder');
+const phoneDownloadPlaceholderIcon = document.getElementById('phone-download-placeholder-icon');
+const phoneDownloadPlaceholderTitle = document.getElementById('phone-download-placeholder-title');
+const phoneDownloadPlaceholderText = document.getElementById('phone-download-placeholder-text');
 
 // Tab switching
 const tabBtns = document.querySelectorAll('.tab-btn');
@@ -20,6 +43,7 @@ const registerForm = document.getElementById('registerForm');
 const verifyForm = document.getElementById('verifyForm');
 const backToRegisterBtn = document.getElementById('back-to-register');
 const forgotPasswordLink = document.getElementById('forgot-password-link');
+const passwordToggleBtns = document.querySelectorAll('[data-password-toggle]');
 
 // Forgot password modal
 const forgotPasswordModal = document.getElementById('forgot-password-modal');
@@ -71,6 +95,12 @@ const planOptions = document.querySelectorAll('.plan-option');
 let pendingVerificationEmail = null;
 let selectedPeriod = 3; // Default: 3 months
 let transientBannerTimer = null;
+let previousViewBeforeApk = 'auth-view';
+let showPhoneDownloadButton = false;
+let hasPhoneDownloadButtonFlag = false;
+let apkDownloadUrlValue = FALLBACK_APK_DOWNLOAD_URL;
+let selectedPhonePlatform = 'android';
+let phoneDownloadConfig = createDefaultPhoneDownloadConfig();
 
 const AUTH_STATE_KEY = 'auth_flow_state';
 const TTL_MS = 5 * 60 * 1000;
@@ -104,6 +134,23 @@ function openForgotPasswordModal() {
 function closeForgotPasswordModal() {
     if (!forgotPasswordModal) return;
     forgotPasswordModal.classList.add('hidden');
+}
+
+function initializePasswordToggles() {
+    passwordToggleBtns.forEach((button) => {
+        const inputId = button.dataset.passwordToggle;
+        const input = document.getElementById(inputId);
+        if (!input) return;
+
+        button.addEventListener('click', () => {
+            const shouldShow = input.type === 'password';
+            input.type = shouldShow ? 'text' : 'password';
+            button.classList.toggle('is-visible', shouldShow);
+            button.setAttribute('aria-pressed', String(shouldShow));
+            button.setAttribute('aria-label', shouldShow ? 'Скрыть пароль' : 'Показать пароль');
+            input.focus();
+        });
+    });
 }
 
 function hideNotificationBanner() {
@@ -416,10 +463,287 @@ async function loadNotifications() {
     }
 }
 
+async function fetchPublicFeatureFlags() {
+    try {
+        const response = await fetch(PUBLIC_FEATURES_URL, {
+            method: 'GET',
+            cache: 'no-cache'
+        });
+
+        if (!response.ok) {
+            console.warn('[Popup] Failed to fetch public feature flags:', response.status);
+            return {};
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.warn('[Popup] Failed to fetch public feature flags:', error);
+        return {};
+    }
+}
+
+async function loadPublicFeatureFlags() {
+    const flags = await fetchPublicFeatureFlags();
+    hasPhoneDownloadButtonFlag = Object.prototype.hasOwnProperty.call(flags, 'phone_download_button_enabled')
+        || Object.prototype.hasOwnProperty.call(flags, 'show_phone_download_button');
+
+    if (hasPhoneDownloadButtonFlag) {
+        showPhoneDownloadButton = readBoolean(
+            flags.phone_download_button_enabled ?? flags.show_phone_download_button,
+            false
+        );
+    }
+
+    applyPhoneDownloadFeatureFlag();
+}
+
+function applyPhoneDownloadFeatureFlag() {
+    if (!phoneDownloadBtn) return;
+
+    phoneDownloadBtn.classList.toggle('hidden', !showPhoneDownloadButton);
+    phoneDownloadBtn.setAttribute('aria-hidden', showPhoneDownloadButton ? 'false' : 'true');
+
+    if (!showPhoneDownloadButton && apkView && !apkView.classList.contains('hidden')) {
+        restorePreviousViewFromApk();
+    }
+}
+
+function buildApkQrCodeUrl(downloadUrl) {
+    return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(downloadUrl)}`;
+}
+
+async function fetchAppUpdateMetadata() {
+    try {
+        const response = await fetch(APP_UPDATE_URL, {
+            method: 'GET',
+            cache: 'no-cache'
+        });
+
+        if (!response.ok) {
+            console.warn('[Popup] Failed to fetch app update metadata:', response.status);
+            return null;
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.warn('[Popup] Failed to fetch app update metadata:', error);
+        return null;
+    }
+}
+
+async function loadApkDownloadMetadata() {
+    const metadata = await fetchAppUpdateMetadata();
+    apkDownloadUrlValue = metadata?.apk_url || FALLBACK_APK_DOWNLOAD_URL;
+    phoneDownloadConfig = mergePhoneDownloadConfig(phoneDownloadConfig, {
+        platforms: {
+            android: {
+                downloadUrl: apkDownloadUrlValue
+            }
+        }
+    });
+    setupApkDownloadView();
+}
+
+function createDefaultPhoneDownloadConfig() {
+    return {
+        buttonLabel: 'Версии Для Телефона',
+        defaultPlatform: 'android',
+        platforms: {
+            android: {
+                title: 'VPS Connect на Android',
+                description: 'Отсканируйте QR-код камерой телефона и установите Android APK.',
+                downloadUrl: apkDownloadUrlValue,
+                buttonLabel: 'Скачать APK',
+                showQr: true,
+                placeholderTitle: '',
+                placeholderText: ''
+            },
+            iphone: {
+                title: 'VPS Connect на iPhone',
+                description: 'Версия для iPhone готовится. APK подходит только для Android.',
+                downloadUrl: '',
+                buttonLabel: 'Для iPhone скоро',
+                showQr: false,
+                placeholderTitle: 'Версия для iPhone готовится',
+                placeholderText: 'APK подходит только для Android.'
+            }
+        }
+    };
+}
+
+function readBoolean(value, fallback = null) {
+    if (value === undefined || value === null || value === '') {
+        return fallback;
+    }
+
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+    }
+
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false;
+    }
+
+    return fallback;
+}
+
+function valueOrFallback(value, fallback) {
+    if (value === undefined || value === null) {
+        return fallback;
+    }
+
+    const normalized = String(value).trim();
+    return normalized ? normalized : fallback;
+}
+
+function normalizePhonePlatformConfig(platform, rawConfig = {}, fallbackConfig) {
+    const fallback = fallbackConfig || {};
+    return {
+        title: valueOrFallback(rawConfig.title, fallback.title),
+        description: valueOrFallback(rawConfig.description, fallback.description),
+        downloadUrl: valueOrFallback(rawConfig.downloadUrl ?? rawConfig.download_url, fallback.downloadUrl),
+        buttonLabel: valueOrFallback(rawConfig.buttonLabel ?? rawConfig.button_label, fallback.buttonLabel),
+        showQr: readBoolean(rawConfig.showQr ?? rawConfig.show_qr, fallback.showQr),
+        placeholderTitle: valueOrFallback(
+            rawConfig.placeholderTitle ?? rawConfig.placeholder_title,
+            fallback.placeholderTitle || (platform === 'iphone' ? 'Версия для iPhone готовится' : '')
+        ),
+        placeholderText: valueOrFallback(
+            rawConfig.placeholderText ?? rawConfig.placeholder_text,
+            fallback.placeholderText || ''
+        )
+    };
+}
+
+function mergePhoneDownloadConfig(baseConfig, overrideConfig = {}) {
+    const base = baseConfig || createDefaultPhoneDownloadConfig();
+    const merged = {
+        buttonLabel: valueOrFallback(overrideConfig.buttonLabel ?? overrideConfig.button_label, base.buttonLabel),
+        defaultPlatform: valueOrFallback(overrideConfig.defaultPlatform ?? overrideConfig.default_platform, base.defaultPlatform),
+        showButton: readBoolean(overrideConfig.showButton ?? overrideConfig.show_button, base.showButton),
+        platforms: {}
+    };
+
+    const platforms = new Set([
+        ...Object.keys(base.platforms || {}),
+        ...Object.keys(overrideConfig.platforms || {})
+    ]);
+
+    platforms.forEach(platform => {
+        merged.platforms[platform] = normalizePhonePlatformConfig(
+            platform,
+            overrideConfig.platforms?.[platform] || {},
+            base.platforms?.[platform]
+        );
+    });
+
+    return merged;
+}
+
+function parsePhoneDownloadJsonConfig(doc) {
+    const jsonEl = doc.getElementById('phone-download-config');
+    const jsonText = jsonEl?.textContent?.trim();
+    if (!jsonText) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(jsonText);
+    } catch (error) {
+        console.warn('[Popup] Failed to parse phone download JSON config:', error);
+        return null;
+    }
+}
+
+function parsePhoneDownloadHtmlConfig(doc) {
+    const root = doc.getElementById('phone-downloads');
+    if (!root) {
+        return null;
+    }
+
+    const config = {
+        buttonLabel: root.dataset.buttonLabel,
+        defaultPlatform: root.dataset.defaultPlatform,
+        showButton: root.dataset.showButton,
+        platforms: {}
+    };
+
+    root.querySelectorAll('[data-platform]').forEach(platformEl => {
+        const platform = platformEl.dataset.platform;
+        if (!platform) {
+            return;
+        }
+
+        config.platforms[platform] = {
+            title: platformEl.dataset.title,
+            description: platformEl.dataset.description || platformEl.textContent.trim(),
+            downloadUrl: platformEl.dataset.downloadUrl,
+            buttonLabel: platformEl.dataset.buttonLabel,
+            showQr: platformEl.dataset.showQr,
+            placeholderTitle: platformEl.dataset.placeholderTitle,
+            placeholderText: platformEl.dataset.placeholderText
+        };
+    });
+
+    return config;
+}
+
+async function fetchPhoneDownloadConfig() {
+    try {
+        const response = await fetch(PHONE_DOWNLOAD_CONFIG_URL, {
+            method: 'GET',
+            cache: 'no-cache'
+        });
+
+        if (!response.ok) {
+            console.warn('[Popup] Failed to fetch phone download config:', response.status);
+            return null;
+        }
+
+        const html = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        return parsePhoneDownloadJsonConfig(doc) || parsePhoneDownloadHtmlConfig(doc);
+    } catch (error) {
+        console.warn('[Popup] Failed to fetch phone download config:', error);
+        return null;
+    }
+}
+
+async function loadPhoneDownloadConfig() {
+    const remoteConfig = await fetchPhoneDownloadConfig();
+    if (!remoteConfig) {
+        return;
+    }
+
+    phoneDownloadConfig = mergePhoneDownloadConfig(phoneDownloadConfig, remoteConfig);
+
+    if (!hasPhoneDownloadButtonFlag && typeof phoneDownloadConfig.showButton === 'boolean') {
+        showPhoneDownloadButton = phoneDownloadConfig.showButton;
+        applyPhoneDownloadFeatureFlag();
+    }
+
+    if (phoneDownloadConfig.defaultPlatform && phoneDownloadConfig.platforms?.[phoneDownloadConfig.defaultPlatform]) {
+        selectedPhonePlatform = phoneDownloadConfig.defaultPlatform;
+    }
+
+    setupApkDownloadView();
+}
+
 /**
  * Initialize popup
  */
 async function init() {
+    setupApkDownloadView();
+    await loadApkDownloadMetadata();
+    await loadPublicFeatureFlags();
+    await loadPhoneDownloadConfig();
+
     // Load notifications from server (non-blocking)
     loadNotifications();
     
@@ -467,6 +791,33 @@ async function syncWhitelistFromServer() {
  * Setup event listeners
  */
 function setupEventListeners() {
+    initializePasswordToggles();
+
+    if (phoneDownloadBtn) {
+        phoneDownloadBtn.addEventListener('click', handlePhoneDownloadClick);
+    }
+
+    if (apkDownloadBtn) {
+        apkDownloadBtn.addEventListener('click', openApkDownloadUrl);
+    }
+
+    if (apkBackBtn) {
+        apkBackBtn.addEventListener('click', restorePreviousViewFromApk);
+    }
+
+    if (apkDownloadUrl) {
+        apkDownloadUrl.addEventListener('click', (event) => {
+            event.preventDefault();
+            openApkDownloadUrl();
+        });
+    }
+
+    phonePlatformBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            setPhonePlatform(btn.dataset.phonePlatform);
+        });
+    });
+
     // Tab switching
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -541,6 +892,155 @@ function applySelectedPeriodVisual() {
         const period = parseInt(opt.dataset.period);
         opt.classList.toggle('selected', period === selectedPeriod);
     });
+}
+
+function getPhonePlatformConfig(platform = selectedPhonePlatform) {
+    return phoneDownloadConfig.platforms?.[platform] || createDefaultPhoneDownloadConfig().platforms[platform];
+}
+
+function setupApkDownloadView() {
+    if (phoneDownloadBtn && phoneDownloadConfig.buttonLabel) {
+        phoneDownloadBtn.textContent = phoneDownloadConfig.buttonLabel;
+    }
+
+    updatePhonePlatformView();
+}
+
+function setPhonePlatform(platform) {
+    selectedPhonePlatform = platform === 'iphone' ? 'iphone' : 'android';
+    updatePhonePlatformView();
+}
+
+function updatePhonePlatformView() {
+    const isAndroid = selectedPhonePlatform === 'android';
+    const platformConfig = getPhonePlatformConfig();
+    const downloadUrl = platformConfig?.downloadUrl || '';
+    const showQr = platformConfig?.showQr === true && Boolean(downloadUrl);
+    const showPlaceholder = !downloadUrl && !showQr;
+
+    phonePlatformBtns.forEach(btn => {
+        const isActive = btn.dataset.phonePlatform === selectedPhonePlatform;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    if (phonePlatformTitle) {
+        phonePlatformTitle.textContent = platformConfig?.title || (isAndroid ? 'VPS Connect на Android' : 'VPS Connect на iPhone');
+    }
+
+    if (phonePlatformDescription) {
+        phonePlatformDescription.textContent = platformConfig?.description || '';
+    }
+
+    if (apkQrCard) {
+        apkQrCard.classList.toggle('hidden', !showQr);
+    }
+
+    if (apkQrImage && downloadUrl) {
+        apkQrImage.src = buildApkQrCodeUrl(downloadUrl);
+    }
+
+    if (phoneDownloadPlaceholder) {
+        phoneDownloadPlaceholder.classList.toggle('hidden', !showPlaceholder);
+    }
+
+    if (phoneDownloadPlaceholderIcon) {
+        phoneDownloadPlaceholderIcon.src = PHONE_PLATFORM_ICONS[selectedPhonePlatform] || PHONE_PLATFORM_ICONS.android;
+    }
+
+    if (phoneDownloadPlaceholderTitle) {
+        phoneDownloadPlaceholderTitle.textContent = platformConfig?.placeholderTitle || '';
+    }
+
+    if (phoneDownloadPlaceholderText) {
+        phoneDownloadPlaceholderText.textContent = platformConfig?.placeholderText || '';
+    }
+
+    if (apkDownloadUrl) {
+        apkDownloadUrl.href = downloadUrl || '#';
+        apkDownloadUrl.textContent = '';
+        apkDownloadUrl.classList.add('hidden');
+        apkDownloadUrl.setAttribute('aria-hidden', 'true');
+        apkDownloadUrl.setAttribute('tabindex', '-1');
+    }
+
+    if (apkDownloadBtn) {
+        apkDownloadBtn.disabled = !downloadUrl;
+        apkDownloadBtn.textContent = platformConfig?.buttonLabel || (downloadUrl ? 'Скачать' : 'Скоро');
+    }
+}
+
+function setPhonePlatformSwitcherVisible(isVisible) {
+    if (!phonePlatformSwitcher) return;
+
+    phonePlatformSwitcher.classList.toggle('hidden', !isVisible);
+}
+
+function setPhoneDownloadButtonActive(isActive) {
+    if (!phoneDownloadBtn) return;
+
+    phoneDownloadBtn.classList.toggle('active', isActive);
+    phoneDownloadBtn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+}
+
+function getCurrentMainViewId() {
+    const views = [authView, dashboardView, forceChangeView].filter(Boolean);
+    const currentView = views.find(view => !view.classList.contains('hidden'));
+    return currentView ? currentView.id : 'auth-view';
+}
+
+function hideMainViews() {
+    authView.classList.add('hidden');
+    dashboardView.classList.add('hidden');
+    if (forceChangeView) {
+        forceChangeView.classList.add('hidden');
+    }
+}
+
+function handlePhoneDownloadClick() {
+    if (!showPhoneDownloadButton) return;
+
+    if (apkView && !apkView.classList.contains('hidden')) {
+        restorePreviousViewFromApk();
+        return;
+    }
+
+    showApkDownloadView();
+}
+
+function showApkDownloadView() {
+    if (!apkView) return;
+
+    previousViewBeforeApk = getCurrentMainViewId();
+    hideMainViews();
+    setPhonePlatformSwitcherVisible(true);
+    apkView.classList.remove('hidden');
+    setPhoneDownloadButtonActive(true);
+    updatePhonePlatformView();
+}
+
+function restorePreviousViewFromApk() {
+    if (apkView) {
+        apkView.classList.add('hidden');
+    }
+
+    setPhonePlatformSwitcherVisible(false);
+    setPhoneDownloadButtonActive(false);
+
+    const previousView = document.getElementById(previousViewBeforeApk) || authView;
+    previousView.classList.remove('hidden');
+}
+
+function openApkDownloadUrl() {
+    const downloadUrl = getPhonePlatformConfig()?.downloadUrl;
+    if (!downloadUrl) return;
+
+    try {
+        chrome.tabs.create({ url: downloadUrl });
+    } catch (error) {
+        console.warn('[Popup] Failed to open APK download URL in new tab:', error);
+        window.open(downloadUrl, '_blank', 'noopener');
+    }
 }
 
 /**
@@ -772,17 +1272,27 @@ async function verifyToken(token) {
 function showAuth() {
     authView.classList.remove('hidden');
     dashboardView.classList.add('hidden');
+    if (apkView) {
+        apkView.classList.add('hidden');
+    }
+    setPhonePlatformSwitcherVisible(false);
     if (forceChangeView) {
         forceChangeView.classList.add('hidden');
     }
+    setPhoneDownloadButtonActive(false);
 }
 
 async function showDashboard() {
     authView.classList.add('hidden');
     dashboardView.classList.remove('hidden');
+    if (apkView) {
+        apkView.classList.add('hidden');
+    }
+    setPhonePlatformSwitcherVisible(false);
     if (forceChangeView) {
         forceChangeView.classList.add('hidden');
     }
+    setPhoneDownloadButtonActive(false);
     
     // Load proxy status
     const runtimeStatus = await getRuntimeProxyStatus();
@@ -804,9 +1314,14 @@ async function showDashboard() {
 async function showForceChangePasswordView() {
     authView.classList.add('hidden');
     dashboardView.classList.add('hidden');
+    if (apkView) {
+        apkView.classList.add('hidden');
+    }
+    setPhonePlatformSwitcherVisible(false);
     if (forceChangeView) {
         forceChangeView.classList.remove('hidden');
     }
+    setPhoneDownloadButtonActive(false);
 }
 
 /**

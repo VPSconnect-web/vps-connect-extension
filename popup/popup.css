@@ -59,11 +59,123 @@ body {
 .header h1 {
     font-size: 16px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .header .info {
     margin-left: auto;
     position: relative;
+}
+
+.phone-download-btn {
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 7px 9px;
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.phone-download-btn::before {
+    content: "";
+    position: absolute;
+    top: -80%;
+    bottom: -80%;
+    left: -55%;
+    width: 38px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.88), transparent);
+    transform: rotate(24deg);
+    animation: phoneShine 2.4s ease-in-out infinite;
+}
+
+.phone-download-btn:hover,
+.phone-download-btn.active {
+    background: rgba(255, 255, 255, 0.26);
+    border-color: rgba(255, 255, 255, 0.95);
+}
+
+.phone-download-btn:active {
+    transform: scale(0.97);
+}
+
+.phone-download-btn.hidden {
+    display: none;
+}
+
+@keyframes phoneShine {
+    0% { left: -55%; opacity: 0; }
+    12% { opacity: 1; }
+    42% { left: 120%; opacity: 0; }
+    100% { left: 120%; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .phone-download-btn::before {
+        animation: none;
+        display: none;
+    }
+}
+
+.phone-platform-switcher {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface-card);
+    border-bottom: 1px solid var(--border-soft);
+}
+
+.phone-platform-switcher.hidden {
+    display: none;
+}
+
+.phone-platform-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 38px;
+    padding: 7px 8px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--surface-muted);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px rgba(21, 53, 93, 0.06);
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s, background 0.2s;
+}
+
+.phone-platform-btn:hover {
+    border-color: var(--brand-accent);
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.1);
+}
+
+.phone-platform-btn.active {
+    border-color: var(--brand-primary);
+    background: var(--brand-primary-soft);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12), 0 6px 14px rgba(37, 99, 235, 0.1);
+}
+
+.phone-platform-btn:active {
+    transform: scale(0.98);
+}
+
+.phone-platform-btn img {
+    display: block;
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    flex-shrink: 0;
 }
 
 .info-trigger {
@@ -224,6 +336,89 @@ body {
 
 .view.hidden {
     display: none;
+}
+
+.apk-download {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+}
+
+.apk-download h2 {
+    align-self: stretch;
+    color: var(--text-primary);
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.apk-download p {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.apk-qr-card {
+    background: #ffffff;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    box-shadow: var(--shadow-soft);
+    padding: 14px;
+}
+
+.apk-qr-card.hidden {
+    display: none;
+}
+
+.apk-qr-image {
+    display: block;
+    width: 220px;
+    height: 220px;
+}
+
+.apk-download-url {
+    display: none;
+}
+
+.phone-download-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 24px 18px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--surface-muted);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-soft);
+}
+
+.phone-download-placeholder.hidden {
+    display: none;
+}
+
+.phone-download-placeholder img {
+    display: block;
+}
+
+.phone-download-placeholder strong {
+    color: var(--text-primary);
+    font-size: 16px;
+}
+
+.phone-download-placeholder span {
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.apk-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
 }
 
 .subscription-section {
@@ -460,6 +655,60 @@ body {
     outline: none;
     border-color: var(--brand-primary);
     box-shadow: 0 0 0 3px rgba(36, 107, 206, 0.12);
+}
+
+.password-field {
+    position: relative;
+}
+
+.password-field input {
+    padding-right: 44px;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transform: translateY(-50%);
+    transition: background 0.2s, color 0.2s;
+}
+
+.password-toggle:hover {
+    background: var(--brand-primary-soft);
+    color: var(--brand-primary);
+}
+
+.password-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(36, 107, 206, 0.16);
+}
+
+.password-eye {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.password-eye-hidden,
+.password-toggle.is-visible .password-eye-visible {
+    display: none;
+}
+
+.password-toggle.is-visible .password-eye-hidden {
+    display: block;
 }
 
 .form-group small {

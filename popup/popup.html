@@ -16,6 +16,9 @@
                 <img src="../icons/icon48.png" alt="VPS Connect logo" width="28" height="28">
             </div>
             <h1>VPS Connect</h1>
+            <button type="button" id="phone-download-btn" class="phone-download-btn hidden" aria-label="Скачать VPS Connect на телефон">
+                Версии Для Телефона
+            </button>
             <div class="info">
                 <div class="info-trigger" tabindex="0">i</div>
                 <div class="info-dropdown">
@@ -30,6 +33,17 @@
                 <span class="notification-icon"></span>
                 <span class="notification-text" id="notification-text"></span>
             </div>
+        </div>
+
+        <div id="phone-platform-switcher" class="phone-platform-switcher hidden" role="tablist" aria-label="Платформа телефона">
+            <button type="button" class="phone-platform-btn" data-phone-platform="iphone" role="tab" aria-selected="false">
+                <img src="../icons/iphone-platform.png" alt="" width="24" height="24">
+                <span>iPhone</span>
+            </button>
+            <button type="button" class="phone-platform-btn active" data-phone-platform="android" role="tab" aria-selected="true">
+                <img src="../icons/android-platform.png" alt="" width="24" height="24">
+                <span>Android</span>
+            </button>
         </div>
 
         <!-- Not Authenticated View -->
@@ -49,7 +63,21 @@
                     </div>
                     <div class="form-group">
                         <label for="login-password">Пароль</label>
-                        <input type="password" id="login-password" name="password" placeholder="••••••••" required>
+                        <div class="password-field">
+                            <input type="password" id="login-password" name="password" placeholder="••••••••" required>
+                            <button type="button" class="password-toggle" data-password-toggle="login-password" aria-label="Показать пароль" aria-pressed="false">
+                                <svg class="password-eye password-eye-visible" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <svg class="password-eye password-eye-hidden" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 3l18 18"/>
+                                    <path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/>
+                                    <path d="M8.2 5.7A10.8 10.8 0 0 1 12 5c6 0 9.5 7 9.5 7a16.4 16.4 0 0 1-2.1 2.9"/>
+                                    <path d="M6.1 7.5C3.7 9.2 2.5 12 2.5 12s3.5 7 9.5 7a10.6 10.6 0 0 0 4.7-1.1"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="form-group text-right">
                         <button type="button" id="forgot-password-link" class="link-button">Забыли пароль?</button>
@@ -68,12 +96,40 @@
                     </div>
                     <div class="form-group">
                         <label for="register-password">Пароль</label>
-                        <input type="password" id="register-password" name="password" placeholder="••••••••" required minlength="8">
+                        <div class="password-field">
+                            <input type="password" id="register-password" name="password" placeholder="••••••••" required minlength="8">
+                            <button type="button" class="password-toggle" data-password-toggle="register-password" aria-label="Показать пароль" aria-pressed="false">
+                                <svg class="password-eye password-eye-visible" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <svg class="password-eye password-eye-hidden" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 3l18 18"/>
+                                    <path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/>
+                                    <path d="M8.2 5.7A10.8 10.8 0 0 1 12 5c6 0 9.5 7 9.5 7a16.4 16.4 0 0 1-2.1 2.9"/>
+                                    <path d="M6.1 7.5C3.7 9.2 2.5 12 2.5 12s3.5 7 9.5 7a10.6 10.6 0 0 0 4.7-1.1"/>
+                                </svg>
+                            </button>
+                        </div>
                         <small>Минимум 8 символов</small>
                     </div>
                     <div class="form-group">
                         <label for="register-password-confirm">Подтвердите пароль</label>
-                        <input type="password" id="register-password-confirm" name="password-confirm" placeholder="••••••••" required>
+                        <div class="password-field">
+                            <input type="password" id="register-password-confirm" name="password-confirm" placeholder="••••••••" required>
+                            <button type="button" class="password-toggle" data-password-toggle="register-password-confirm" aria-label="Показать пароль" aria-pressed="false">
+                                <svg class="password-eye password-eye-visible" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <svg class="password-eye password-eye-hidden" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M3 3l18 18"/>
+                                    <path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"/>
+                                    <path d="M8.2 5.7A10.8 10.8 0 0 1 12 5c6 0 9.5 7 9.5 7a16.4 16.4 0 0 1-2.1 2.9"/>
+                                    <path d="M6.1 7.5C3.7 9.2 2.5 12 2.5 12s3.5 7 9.5 7a10.6 10.6 0 0 0 4.7-1.1"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-primary">Зарегистрироваться</button>
                     <div class="error-message" id="register-error"></div>
@@ -139,6 +195,31 @@
                 <button type="submit" class="btn btn-primary">Сменить пароль</button>
                 <div class="error-message" id="force-change-error"></div>
             </form>
+        </div>
+
+        <!-- Android APK Download View -->
+        <div id="apk-view" class="view hidden">
+            <div class="apk-download">
+                <h2 id="phone-platform-title">VPS Connect на Android</h2>
+                <p id="phone-platform-description">Отсканируйте QR-код камерой телефона и установите Android APK.</p>
+
+                <div id="apk-qr-card" class="apk-qr-card">
+                    <img id="apk-qr-image" class="apk-qr-image" src="" alt="QR-код для скачивания Android APK" width="220" height="220">
+                </div>
+
+                <div id="phone-download-placeholder" class="phone-download-placeholder hidden">
+                    <img id="phone-download-placeholder-icon" src="../icons/iphone-platform.png" alt="" width="42" height="42">
+                    <strong id="phone-download-placeholder-title">Версия для iPhone готовится</strong>
+                    <span id="phone-download-placeholder-text">APK подходит только для Android.</span>
+                </div>
+
+                <a id="apk-download-url" class="apk-download-url hidden" href="#" target="_blank" rel="noopener noreferrer" aria-hidden="true" tabindex="-1"></a>
+
+                <div class="apk-actions">
+                    <button type="button" id="apk-download-btn" class="btn btn-primary">Скачать APK</button>
+                    <button type="button" id="apk-back-btn" class="btn btn-secondary">Назад</button>
+                </div>
+            </div>
         </div>
 
         <!-- Authenticated View -->

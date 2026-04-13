@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VPS Connect Privacy Policy</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4efe8;
+      --panel: rgba(255, 252, 247, 0.92);
+      --text: #1f1a17;
+      --muted: #5f554d;
+      --accent: #0f766e;
+      --line: rgba(31, 26, 23, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.15), transparent 36%),
+        linear-gradient(180deg, #f8f3ec 0%, var(--bg) 100%);
+      line-height: 1.65;
+    }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 48px 20px 72px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 20px 60px rgba(31, 26, 23, 0.08);
+      backdrop-filter: blur(10px);
+    }
+
+    h1,
+    h2 {
+      line-height: 1.2;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+    }
+
+    h2 {
+      margin: 36px 0 12px;
+      font-size: 1.35rem;
+    }
+
+    p,
+    li {
+      font-size: 1.05rem;
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      font-size: 0.85rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin: 0 0 28px;
+    }
+
+    ul {
+      padding-left: 22px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .note {
+      padding: 16px 18px;
+      border-left: 4px solid var(--accent);
+      background: rgba(15, 118, 110, 0.08);
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <p class="eyebrow">VPS Connect</p>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Last updated: March 27, 2026</p>
+
+      <p>
+        VPS Connect is a browser extension that helps users connect browser traffic to their own VPS or proxy
+        infrastructure. This Privacy Policy explains what data the extension may access, how it is used, and what is
+        not collected by the developers.
+      </p>
+
+      <h2>Information We Process</h2>
+      <p>The extension may process the following categories of information in order to provide its core features:</p>
+      <ul>
+        <li>Authentication data entered by the user, such as email, username, or password, when logging in or registering.</li>
+        <li>Access tokens or similar session data returned by the backend API after successful authentication.</li>
+        <li>Proxy and routing settings configured inside the extension.</li>
+        <li>Lists of websites or URL patterns added by the user for selective routing.</li>
+        <li>Technical request details required for proxy authentication and browser networking features.</li>
+      </ul>
+
+      <h2>How Information Is Used</h2>
+      <p>The extension uses this information only to operate the requested functionality, including:</p>
+      <ul>
+        <li>Signing the user in and maintaining an authenticated session.</li>
+        <li>Applying proxy settings in the browser.</li>
+        <li>Routing traffic according to user-selected rules.</li>
+        <li>Responding to proxy authentication requests when the browser requires credentials.</li>
+      </ul>
+
+      <h2>Data Storage</h2>
+      <p>
+        Extension settings and session-related data may be stored locally in the browser using the browser extension
+        storage APIs. The developers do not use the extension itself to sell personal data or to build advertising
+        profiles.
+      </p>
+
+      <h2>Permissions</h2>
+      <p>The extension requests browser permissions that are necessary for its operation, including permissions related to:</p>
+      <ul>
+        <li>Proxy configuration.</li>
+        <li>Local storage of settings and session state.</li>
+        <li>Handling network and authentication events required by proxy connections.</li>
+        <li>Alarm or timer-based background tasks.</li>
+        <li>Working with websites the user chooses to route through the configured proxy.</li>
+      </ul>
+
+      <h2>Data Sharing</h2>
+      <p>
+        The extension does not intentionally share personal information with third parties except where it is necessary
+        to communicate with the backend service or proxy infrastructure selected for the product.
+      </p>
+
+      <h2>Third-Party Services</h2>
+      <p>
+        If the extension communicates with external APIs, proxy servers, or hosting infrastructure, those services may
+        process data according to their own privacy policies and operational requirements.
+      </p>
+
+      <h2>Data Retention</h2>
+      <p>
+        Data stored locally by the extension remains in the browser until it is removed by the user, overwritten during
+        normal operation, or deleted when the extension is uninstalled.
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        Reasonable efforts are made to protect authentication and configuration data, but no method of electronic
+        storage or transmission is completely secure.
+      </p>
+
+      <h2>Children's Privacy</h2>
+      <p>
+        The extension is not intended for children, and the developers do not knowingly collect personal information
+        from children.
+      </p>
+
+      <h2>Changes to This Policy</h2>
+      <p>
+        This Privacy Policy may be updated from time to time. The latest version will be published at this page.
+      </p>
+
+      <h2>Contact</h2>
+      <p class="note">
+        If you want to add a support or legal contact, replace this section with your real email address or website
+        before publishing.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

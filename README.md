@@ -46,3 +46,18 @@ The price for 1 month is about $1 - $2
 ## 📝 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
+
+## Privacy Policy Publishing
+
+To keep this repository private and still publish a public privacy policy page, use a second public GitHub repository for GitHub Pages.
+
+1. Create a public repository that will host the static page.
+   Example: `vpsconnect-web/vps-connect-extension`
+2. In that public repository, enable GitHub Pages from the `main` branch root.
+3. In this private repository, add:
+   - repository variable `PUBLIC_PAGES_REPOSITORY` with the value `vpsconnect-web/vps-connect-extension`
+   - optional repository variable `PUBLIC_PAGES_BRANCH` if the public repo uses a branch other than `main`
+   - repository secret `PUBLIC_PAGES_TOKEN` with a fine-grained personal access token that has `Contents: Read and write` access to the public repository
+4. Push changes to `main` or run the `Deploy Privacy Policy` workflow manually.
+
+The workflow publishes only `docs/privacy-policy.html` into the public repository, so the rest of this private repository remains private.

@@ -1,0 +1,58 @@
+name: Deploy Privacy Policy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/privacy-policy.html
+      - .github/workflows/deploy-privacy-policy.yml
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ vars.PUBLIC_PAGES_REPOSITORY != '' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+
+      - name: Prepare public site files
+        run: |
+          mkdir -p public-site
+          cp docs/privacy-policy.html public-site/privacy-policy.html
+          touch public-site/.nojekyll
+
+      - name: Publish to public Pages repository
+        env:
+          TARGET_REPOSITORY: ${{ vars.PUBLIC_PAGES_REPOSITORY }}
+          TARGET_BRANCH: ${{ vars.PUBLIC_PAGES_BRANCH || 'main' }}
+          DEPLOY_TOKEN: ${{ secrets.PUBLIC_PAGES_TOKEN }}
+        run: |
+          if [ -z "$DEPLOY_TOKEN" ]; then
+            echo "PUBLIC_PAGES_TOKEN secret is not configured."
+            exit 1
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git clone "https://x-access-token:${DEPLOY_TOKEN}@github.com/${TARGET_REPOSITORY}.git" deployed-site
+          cd deployed-site
+
+          git checkout "${TARGET_BRANCH}" 2>/dev/null || git checkout --orphan "${TARGET_BRANCH}"
+
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+          cp -R ../public-site/. .
+
+          if git diff --quiet --no-ext-diff && git diff --cached --quiet --no-ext-diff; then
+            echo "No changes to publish."
+            exit 0
+          fi
+
+          git add .
+          git commit -m "Deploy privacy policy from ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+          git push origin "${TARGET_BRANCH}"
