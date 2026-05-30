@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "VPS Connect",
-  "version": "1.0.8",
+  "version": "1.0.24",
+  "update_url": "https://clients2.google.com/service/update2/crx",
   "description": "Быстрое подключение к VPS серверу в один клик",
   
   "permissions": [

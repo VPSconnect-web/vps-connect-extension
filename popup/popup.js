@@ -1,13 +1,15 @@
 
 import { PROXY_CONFIG } from '../background/proxy-config.js';
-import { parseJsonResponse, requestJson } from '../shared/api-client.js';
+import { failoverFetch, parseJsonResponse, requestJson, requestPrimaryJson } from '../shared/api-client.js';
 
 // API Configuration
 const API_BASE_URL = `${PROXY_CONFIG.authAPI.baseURL}/api`;
 const PUBLIC_FEATURES_URL = `${API_BASE_URL}/public/features`;
 const APP_UPDATE_URL = `${API_BASE_URL}/mobile/v1/app/update?version_code=0`;
-const FALLBACK_APK_DOWNLOAD_URL = 'https://www.vpsconect.ru/android_apk.apk';
-const PHONE_DOWNLOAD_CONFIG_URL = 'https://www.vpsconect.ru/phone-downloads.html';
+const FALLBACK_APK_DOWNLOAD_URL = new URL('/android_apk.apk', PROXY_CONFIG.authAPI.baseURL).toString();
+const REFRESH_FAIL_STREAK_KEY = 'refreshFailStreak';
+const REFRESH_FAIL_THRESHOLD = 5;
+const RESET_SESSIONS_PRIMARY_RETRY_ATTEMPTS = 5;
 const PHONE_PLATFORM_ICONS = {
     android: '../icons/android-platform.png',
     iphone: '../icons/iphone-platform.png'
@@ -41,6 +43,7 @@ const tabContents = document.querySelectorAll('.tab-content');
 const loginForm = document.getElementById('loginForm');
 const registerForm = document.getElementById('registerForm');
 const verifyForm = document.getElementById('verifyForm');
+const resetSessionsBtn = document.getElementById('reset-sessions-btn');
 const backToRegisterBtn = document.getElementById('back-to-register');
 const forgotPasswordLink = document.getElementById('forgot-password-link');
 const passwordToggleBtns = document.querySelectorAll('[data-password-toggle]');
@@ -58,7 +61,6 @@ const forceChangePasswordForm = document.getElementById('forceChangePasswordForm
 // Dashboard elements
 const toggleProxyBtn = document.getElementById('toggle-proxy');
 const proxyStatusEl = document.getElementById('proxy-status');
-const proxyServerEl = document.getElementById('proxy-server');
 const logoutBtn = document.getElementById('logout-btn');
 
 // Proxy mode elements
@@ -90,13 +92,18 @@ const subscriptionDaysLeft = document.getElementById('subscription-days-left');
 const buySubscriptionBtn = document.getElementById('buy-subscription-btn');
 const extendSubscriptionBtn = document.getElementById('extend-subscription-btn');
 const planOptions = document.querySelectorAll('.plan-option');
+const extendSubscriptionModal = document.getElementById('extend-subscription-modal');
+const extendPlanOptions = document.querySelectorAll('.extend-plan-option');
+const extendModalCancel = document.getElementById('extend-modal-cancel');
+const extendModalConfirm = document.getElementById('extend-modal-confirm');
 
 // Store email for verification
 let pendingVerificationEmail = null;
 let selectedPeriod = 3; // Default: 3 months
+let extendSelectedPeriod = 3; // Default for extend modal
 let transientBannerTimer = null;
 let previousViewBeforeApk = 'auth-view';
-let showPhoneDownloadButton = false;
+let showPhoneDownloadButton = true;
 let hasPhoneDownloadButtonFlag = false;
 let apkDownloadUrlValue = FALLBACK_APK_DOWNLOAD_URL;
 let selectedPhonePlatform = 'android';
@@ -134,6 +141,14 @@ function openForgotPasswordModal() {
 function closeForgotPasswordModal() {
     if (!forgotPasswordModal) return;
     forgotPasswordModal.classList.add('hidden');
+}
+
+function runBackgroundTask(task, label) {
+    Promise.resolve()
+        .then(task)
+        .catch(error => {
+            console.warn(`[Popup] Background task failed: ${label}`, error);
+        });
 }
 
 function initializePasswordToggles() {
@@ -243,7 +258,7 @@ async function handleForgotPassword(e) {
     showLoading();
 
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/forgot-password`, {
+        const response = await failoverFetch(`${API_BASE_URL}/auth/forgot-password`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email })
@@ -304,7 +319,7 @@ async function handleForceChangePassword(e) {
             return;
         }
 
-        const response = await fetch(`${API_BASE_URL}/auth/change-password`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/auth/change-password`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -465,7 +480,7 @@ async function loadNotifications() {
 
 async function fetchPublicFeatureFlags() {
     try {
-        const response = await fetch(PUBLIC_FEATURES_URL, {
+        const response = await failoverFetch(PUBLIC_FEATURES_URL, {
             method: 'GET',
             cache: 'no-cache'
         });
@@ -512,9 +527,23 @@ function buildApkQrCodeUrl(downloadUrl) {
     return `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=12&data=${encodeURIComponent(downloadUrl)}`;
 }
 
+function resolveApkDownloadUrl(downloadUrl) {
+    const normalized = String(downloadUrl || '').trim();
+    if (!normalized) {
+        return '';
+    }
+
+    try {
+        return new URL(normalized, PROXY_CONFIG.authAPI.baseURL).toString();
+    } catch (error) {
+        console.warn('[Popup] Invalid APK download URL:', normalized, error);
+        return '';
+    }
+}
+
 async function fetchAppUpdateMetadata() {
     try {
-        const response = await fetch(APP_UPDATE_URL, {
+        const response = await failoverFetch(APP_UPDATE_URL, {
             method: 'GET',
             cache: 'no-cache'
         });
@@ -533,14 +562,13 @@ async function fetchAppUpdateMetadata() {
 
 async function loadApkDownloadMetadata() {
     const metadata = await fetchAppUpdateMetadata();
-    apkDownloadUrlValue = metadata?.apk_url || FALLBACK_APK_DOWNLOAD_URL;
-    phoneDownloadConfig = mergePhoneDownloadConfig(phoneDownloadConfig, {
-        platforms: {
-            android: {
-                downloadUrl: apkDownloadUrlValue
-            }
-        }
-    });
+    const resolvedDownloadUrl = resolveApkDownloadUrl(metadata?.apk_url);
+    if (!resolvedDownloadUrl) {
+        return;
+    }
+
+    apkDownloadUrlValue = resolvedDownloadUrl;
+    phoneDownloadConfig = createDefaultPhoneDownloadConfig();
     setupApkDownloadView();
 }
 
@@ -592,171 +620,29 @@ function readBoolean(value, fallback = null) {
     return fallback;
 }
 
-function valueOrFallback(value, fallback) {
-    if (value === undefined || value === null) {
-        return fallback;
-    }
-
-    const normalized = String(value).trim();
-    return normalized ? normalized : fallback;
-}
-
-function normalizePhonePlatformConfig(platform, rawConfig = {}, fallbackConfig) {
-    const fallback = fallbackConfig || {};
-    return {
-        title: valueOrFallback(rawConfig.title, fallback.title),
-        description: valueOrFallback(rawConfig.description, fallback.description),
-        downloadUrl: valueOrFallback(rawConfig.downloadUrl ?? rawConfig.download_url, fallback.downloadUrl),
-        buttonLabel: valueOrFallback(rawConfig.buttonLabel ?? rawConfig.button_label, fallback.buttonLabel),
-        showQr: readBoolean(rawConfig.showQr ?? rawConfig.show_qr, fallback.showQr),
-        placeholderTitle: valueOrFallback(
-            rawConfig.placeholderTitle ?? rawConfig.placeholder_title,
-            fallback.placeholderTitle || (platform === 'iphone' ? 'Версия для iPhone готовится' : '')
-        ),
-        placeholderText: valueOrFallback(
-            rawConfig.placeholderText ?? rawConfig.placeholder_text,
-            fallback.placeholderText || ''
-        )
-    };
-}
-
-function mergePhoneDownloadConfig(baseConfig, overrideConfig = {}) {
-    const base = baseConfig || createDefaultPhoneDownloadConfig();
-    const merged = {
-        buttonLabel: valueOrFallback(overrideConfig.buttonLabel ?? overrideConfig.button_label, base.buttonLabel),
-        defaultPlatform: valueOrFallback(overrideConfig.defaultPlatform ?? overrideConfig.default_platform, base.defaultPlatform),
-        showButton: readBoolean(overrideConfig.showButton ?? overrideConfig.show_button, base.showButton),
-        platforms: {}
-    };
-
-    const platforms = new Set([
-        ...Object.keys(base.platforms || {}),
-        ...Object.keys(overrideConfig.platforms || {})
-    ]);
-
-    platforms.forEach(platform => {
-        merged.platforms[platform] = normalizePhonePlatformConfig(
-            platform,
-            overrideConfig.platforms?.[platform] || {},
-            base.platforms?.[platform]
-        );
-    });
-
-    return merged;
-}
-
-function parsePhoneDownloadJsonConfig(doc) {
-    const jsonEl = doc.getElementById('phone-download-config');
-    const jsonText = jsonEl?.textContent?.trim();
-    if (!jsonText) {
-        return null;
-    }
-
-    try {
-        return JSON.parse(jsonText);
-    } catch (error) {
-        console.warn('[Popup] Failed to parse phone download JSON config:', error);
-        return null;
-    }
-}
-
-function parsePhoneDownloadHtmlConfig(doc) {
-    const root = doc.getElementById('phone-downloads');
-    if (!root) {
-        return null;
-    }
-
-    const config = {
-        buttonLabel: root.dataset.buttonLabel,
-        defaultPlatform: root.dataset.defaultPlatform,
-        showButton: root.dataset.showButton,
-        platforms: {}
-    };
-
-    root.querySelectorAll('[data-platform]').forEach(platformEl => {
-        const platform = platformEl.dataset.platform;
-        if (!platform) {
-            return;
-        }
-
-        config.platforms[platform] = {
-            title: platformEl.dataset.title,
-            description: platformEl.dataset.description || platformEl.textContent.trim(),
-            downloadUrl: platformEl.dataset.downloadUrl,
-            buttonLabel: platformEl.dataset.buttonLabel,
-            showQr: platformEl.dataset.showQr,
-            placeholderTitle: platformEl.dataset.placeholderTitle,
-            placeholderText: platformEl.dataset.placeholderText
-        };
-    });
-
-    return config;
-}
-
-async function fetchPhoneDownloadConfig() {
-    try {
-        const response = await fetch(PHONE_DOWNLOAD_CONFIG_URL, {
-            method: 'GET',
-            cache: 'no-cache'
-        });
-
-        if (!response.ok) {
-            console.warn('[Popup] Failed to fetch phone download config:', response.status);
-            return null;
-        }
-
-        const html = await response.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
-        return parsePhoneDownloadJsonConfig(doc) || parsePhoneDownloadHtmlConfig(doc);
-    } catch (error) {
-        console.warn('[Popup] Failed to fetch phone download config:', error);
-        return null;
-    }
-}
-
-async function loadPhoneDownloadConfig() {
-    const remoteConfig = await fetchPhoneDownloadConfig();
-    if (!remoteConfig) {
-        return;
-    }
-
-    phoneDownloadConfig = mergePhoneDownloadConfig(phoneDownloadConfig, remoteConfig);
-
-    if (!hasPhoneDownloadButtonFlag && typeof phoneDownloadConfig.showButton === 'boolean') {
-        showPhoneDownloadButton = phoneDownloadConfig.showButton;
-        applyPhoneDownloadFeatureFlag();
-    }
-
-    if (phoneDownloadConfig.defaultPlatform && phoneDownloadConfig.platforms?.[phoneDownloadConfig.defaultPlatform]) {
-        selectedPhonePlatform = phoneDownloadConfig.defaultPlatform;
-    }
-
-    setupApkDownloadView();
-}
-
 /**
  * Initialize popup
  */
 async function init() {
     setupApkDownloadView();
-    await loadApkDownloadMetadata();
-    await loadPublicFeatureFlags();
-    await loadPhoneDownloadConfig();
+    applyPhoneDownloadFeatureFlag();
+    setupEventListeners();
 
-    // Load notifications from server (non-blocking)
-    loadNotifications();
+    runBackgroundTask(loadApkDownloadMetadata, 'app update metadata');
+    runBackgroundTask(loadPublicFeatureFlags, 'public feature flags');
+    runBackgroundTask(loadNotifications, 'notifications');
     
     // Check if user is authenticated
     const token = await getToken();
     
     if (token) {
-        // Verify token
-        const isValid = await verifyToken(token);
-        if (isValid) {
+        const verification = await verifyToken(token);
+        if (verification.status === 'valid') {
             await showDashboard();
+        } else if (verification.status === 'unreachable') {
+            showDashboard();
+            showTransientMessage('Сервер временно недоступен. Локальная сессия сохранена.', 'info', 4500);
         } else {
-            // Token invalid, clear and show auth
             await clearToken();
             showAuth();
         }
@@ -766,8 +652,6 @@ async function init() {
     
     await tryRestoreAuthState();
     
-    // Setup event listeners
-    setupEventListeners();
 }
 
 async function syncWhitelistFromServer() {
@@ -828,6 +712,9 @@ function setupEventListeners() {
     
     // Login form
     loginForm.addEventListener('submit', handleLogin);
+    if (resetSessionsBtn) {
+        resetSessionsBtn.addEventListener('click', handleResetSessionsAndLogin);
+    }
     
     // Register form
     registerForm.addEventListener('submit', handleRegister);
@@ -870,7 +757,7 @@ function setupEventListeners() {
     
     // Subscription management
     buySubscriptionBtn.addEventListener('click', handleBuySubscription);
-    extendSubscriptionBtn.addEventListener('click', handleBuySubscription);
+    extendSubscriptionBtn.addEventListener('click', openExtendModal);
     
     // Plan selection
     planOptions.forEach(option => {
@@ -880,6 +767,18 @@ function setupEventListeners() {
         });
     });
     applySelectedPeriodVisual();
+
+    // Extend modal plan selection
+    extendPlanOptions.forEach(option => {
+        option.addEventListener('click', () => {
+            extendSelectedPeriod = parseInt(option.dataset.period);
+            applyExtendPeriodVisual();
+        });
+    });
+
+    // Extend modal buttons
+    extendModalCancel.addEventListener('click', closeExtendModal);
+    extendModalConfirm.addEventListener('click', handleExtendConfirm);
 
     // Force change password form
     if (forceChangePasswordForm) {
@@ -892,6 +791,30 @@ function applySelectedPeriodVisual() {
         const period = parseInt(opt.dataset.period);
         opt.classList.toggle('selected', period === selectedPeriod);
     });
+}
+
+function applyExtendPeriodVisual() {
+    extendPlanOptions.forEach(opt => {
+        const period = parseInt(opt.dataset.period);
+        opt.classList.toggle('selected', period === extendSelectedPeriod);
+    });
+}
+
+function openExtendModal() {
+    applyExtendPeriodVisual();
+    extendSubscriptionModal.classList.remove('hidden');
+}
+
+function closeExtendModal() {
+    extendSubscriptionModal.classList.add('hidden');
+}
+
+async function handleExtendConfirm() {
+    closeExtendModal();
+    const savedPeriod = selectedPeriod;
+    selectedPeriod = extendSelectedPeriod;
+    await handleBuySubscription();
+    selectedPeriod = savedPeriod;
 }
 
 function getPhonePlatformConfig(platform = selectedPhonePlatform) {
@@ -1062,6 +985,50 @@ function switchTab(tabName) {
     hideError(loginError);
     hideError(registerError);
     hideError(verifyError);
+    setResetSessionsVisible(false);
+}
+
+function isSessionLimitError(error) {
+    return error?.data?.code === 'SESSION_LIMIT_EXCEEDED' ||
+        String(error?.message || '').includes('SESSION_LIMIT_EXCEEDED') ||
+        String(error?.message || '').includes('лимит активных сессий');
+}
+
+function setResetSessionsVisible(visible) {
+    if (!resetSessionsBtn) {
+        return;
+    }
+    resetSessionsBtn.classList.toggle('hidden', !visible);
+}
+
+async function performLogin(email, password) {
+    const { data } = await requestJson(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+    }, 'Ошибка входа');
+
+    await saveAuthSession(data);
+
+    const pending = await getPendingPasswordReset();
+    if (pending.email && pending.email === email) {
+        await savePendingTempPassword(password);
+        await showForceChangePasswordView();
+    } else {
+        await showDashboard();
+
+        const proxyEnabled = await getProxyStatus();
+        if (!proxyEnabled) {
+            try {
+                const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
+                if (response.success) {
+                    updateProxyStatus(response.enabled);
+                }
+            } catch (error) {
+                console.error('[Popup] Failed to auto-enable proxy after login:', error);
+            }
+        }
+    }
 }
 
 /**
@@ -1074,42 +1041,49 @@ async function handleLogin(e) {
     const password = document.getElementById('login-password').value;
     
     hideError(loginError);
+    setResetSessionsVisible(false);
     showLoading();
     
     try {
-        const { data } = await requestJson(`${API_BASE_URL}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-        }, 'Ошибка входа');
-
-        await saveToken(data.token);
-        await saveUser(data.user);
-
-        const pending = await getPendingPasswordReset();
-        if (pending.email && pending.email === email) {
-            await savePendingTempPassword(password);
-            await showForceChangePasswordView();
-        } else {
-            await showDashboard();
-
-            const proxyEnabled = await getProxyStatus();
-            if (!proxyEnabled) {
-                try {
-                    const response = await chrome.runtime.sendMessage({ action: 'toggleProxy' });
-                    if (response.success) {
-                        updateProxyStatus(response.enabled);
-                    }
-                } catch (error) {
-                    console.error('[Popup] Failed to auto-enable proxy after login:', error);
-                }
-            }
-        }
-
+        await performLogin(email, password);
         loginForm.reset();
     } catch (error) {
         console.error('[Popup] Login error:', error);
-        showError(loginError, error.message || 'Не удалось подключиться к серверу');
+        if (isSessionLimitError(error)) {
+            setResetSessionsVisible(true);
+            showError(loginError, 'Достигнут лимит устройств. Можно сбросить активные сессии со всех устройств и войти заново.');
+        } else {
+            showError(loginError, error.message || 'Не удалось подключиться к серверу');
+        }
+    } finally {
+        hideLoading();
+    }
+}
+
+async function handleResetSessionsAndLogin() {
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+
+    hideError(loginError);
+    if (!email || !password) {
+        showError(loginError, 'Введите email и пароль');
+        return;
+    }
+    showLoading();
+
+    try {
+        await requestPrimaryJson(`${API_BASE_URL}/auth/sessions/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+            retryAttempts: RESET_SESSIONS_PRIMARY_RETRY_ATTEMPTS
+        }, 'Ошибка сброса сессий');
+        setResetSessionsVisible(false);
+        await performLogin(email, password);
+        loginForm.reset();
+    } catch (error) {
+        console.error('[Popup] Reset sessions error:', error);
+        showError(loginError, error.message || 'Не удалось сбросить активные сессии');
     } finally {
         hideLoading();
     }
@@ -1178,7 +1152,7 @@ async function handleVerifyEmail(e) {
     showLoading();
     
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/verify-email`, {
+        const response = await failoverFetch(`${API_BASE_URL}/auth/verify-email`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -1188,8 +1162,7 @@ async function handleVerifyEmail(e) {
         });
 
         const data = await parseJsonResponse(response, 'Неверный код. Проверьте код из письма.');
-        await saveToken(data.token);
-        await saveUser(data.user);
+        await saveAuthSession(data);
 
         pendingVerificationEmail = null;
         await clearAuthState();
@@ -1240,6 +1213,27 @@ async function handleToggleProxy() {
  * Handle logout
  */
 async function handleLogout() {
+    const token = await getToken();
+    if (token) {
+        try {
+            await requestJson(`${API_BASE_URL}/auth/logout`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            }, 'Не удалось завершить серверную сессию');
+        } catch (error) {
+            console.warn('[Popup] Backend logout failed, clearing local session anyway:', error);
+        }
+    }
+
+    try {
+        await chrome.runtime.sendMessage({ action: 'disable' });
+    } catch (error) {
+        console.warn('[Popup] Failed to disable proxy during logout:', error);
+    }
+
     await clearToken();
     await clearUser();
     await clearPendingPasswordReset();
@@ -1249,20 +1243,38 @@ async function handleLogout() {
 /**
  * Verify token
  */
-async function verifyToken(token) {
+async function verifyToken(token, { allowRefresh = true } = {}) {
     try {
-        const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+        const response = await failoverFetch(`${API_BASE_URL}/auth/verify`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`
             }
         });
-        
-        return response.ok;
+
+        if (response.ok) {
+            return { status: 'valid' };
+        }
+
+        if (response.status === 401 || response.status === 403) {
+            if (allowRefresh) {
+                const refreshedToken = await refreshAccessToken();
+                if (refreshedToken) {
+                    return verifyToken(refreshedToken, { allowRefresh: false });
+                }
+                if (await hasRefreshSession()) {
+                    return { status: 'unreachable' };
+                }
+            }
+            return { status: 'invalid' };
+        }
+
+        console.warn('[Popup] Token verification returned unexpected status:', response.status);
+        return { status: 'unreachable' };
     } catch (error) {
         console.error('[Popup] Token verification error:', error);
-        return false;
+        return { status: 'unreachable', error };
     }
 }
 
@@ -1293,22 +1305,23 @@ async function showDashboard() {
         forceChangeView.classList.add('hidden');
     }
     setPhoneDownloadButtonActive(false);
-    
-    // Load proxy status
-    const runtimeStatus = await getRuntimeProxyStatus();
-    updateProxyStatus(runtimeStatus.enabled, runtimeStatus.detail);
-    
-    // Update proxy info
-    proxyServerEl.textContent = PROXY_CONFIG.host;
-    
-    // Load proxy mode and whitelist
-    await loadProxyMode();
 
-    await syncWhitelistFromServer();
-    await loadUrlWhitelist();
-    
-    // Load subscription info
-    await loadSubscription();
+    showSubscriptionLoading();
+
+    const [runtimeStatus] = await Promise.all([
+        getRuntimeProxyStatus(),
+        loadProxyMode(),
+        loadUrlWhitelist()
+    ]);
+
+    updateProxyStatus(runtimeStatus.enabled, runtimeStatus.detail);
+
+    runBackgroundTask(async () => {
+        await syncWhitelistFromServer();
+        await loadUrlWhitelist();
+    }, 'server whitelist sync');
+
+    runBackgroundTask(loadSubscription, 'subscription data');
 }
 
 async function showForceChangePasswordView() {
@@ -1380,7 +1393,37 @@ function hideLoading() {
  * Storage helpers
  */
 async function saveToken(token) {
-    return chrome.storage.local.set({ jwtToken: token });
+    return chrome.storage.local.set({ jwtToken: token, proxyAccess: false });
+}
+
+function getAccessToken(data) {
+    return data?.token || data?.accessToken || data?.jwtToken || null;
+}
+
+function getRefreshToken(data) {
+    return data?.refreshToken || data?.refresh_token || null;
+}
+
+async function saveAuthSession(data) {
+    const token = getAccessToken(data);
+    if (!token) {
+        throw new Error('Сервер не вернул токен сессии');
+    }
+
+    const values = {
+        jwtToken: token,
+        proxyAccess: false
+    };
+    const refreshToken = getRefreshToken(data);
+    if (refreshToken) {
+        values.refreshToken = refreshToken;
+    }
+
+    await chrome.storage.local.set(values);
+    await clearRefreshFailStreak();
+    if (data.user) {
+        await saveUser(data.user);
+    }
 }
 
 async function getToken() {
@@ -1388,8 +1431,95 @@ async function getToken() {
     return result.jwtToken;
 }
 
+async function getRefreshTokenFromStorage() {
+    const result = await chrome.storage.local.get('refreshToken');
+    return result.refreshToken;
+}
+
+async function hasRefreshSession() {
+    const result = await chrome.storage.local.get('refreshToken');
+    return Boolean(result.refreshToken);
+}
+
+async function getRefreshFailStreak() {
+    const result = await chrome.storage.local.get(REFRESH_FAIL_STREAK_KEY);
+    const value = Number(result[REFRESH_FAIL_STREAK_KEY] || 0);
+    return Number.isFinite(value) ? value : 0;
+}
+
+async function bumpRefreshFailStreak() {
+    const next = (await getRefreshFailStreak()) + 1;
+    await chrome.storage.local.set({ [REFRESH_FAIL_STREAK_KEY]: next });
+    return next;
+}
+
+async function clearRefreshFailStreak() {
+    await chrome.storage.local.remove(REFRESH_FAIL_STREAK_KEY);
+}
+
+async function refreshAccessToken() {
+    const refreshToken = await getRefreshTokenFromStorage();
+    if (!refreshToken) {
+        return null;
+    }
+
+    try {
+        const { data } = await requestJson(`${API_BASE_URL}/auth/refresh`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ refreshToken })
+        }, 'Не удалось обновить сессию');
+
+        const token = getAccessToken(data);
+        if (!token) {
+            throw new Error('Сервер не вернул токен сессии');
+        }
+
+        const values = { jwtToken: token };
+        const nextRefreshToken = getRefreshToken(data);
+        if (nextRefreshToken) {
+            values.refreshToken = nextRefreshToken;
+        }
+        await chrome.storage.local.set(values);
+        if (data.user) {
+            await saveUser(data.user);
+        }
+        await clearRefreshFailStreak();
+
+        return token;
+    } catch (error) {
+        if (error?.status === 401 || error?.status === 403) {
+            const next = await bumpRefreshFailStreak();
+            if (next >= REFRESH_FAIL_THRESHOLD) {
+                await clearToken();
+                await clearUser();
+                await clearRefreshFailStreak();
+            }
+        }
+        console.error('[Popup] Token refresh error:', error);
+        return null;
+    }
+}
+
+async function authenticatedFetch(url, options = {}) {
+    const response = await failoverFetch(url, options);
+    if (response.status !== 401 && response.status !== 403) {
+        return response;
+    }
+
+    const token = await refreshAccessToken();
+    if (!token) {
+        return response;
+    }
+
+    const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` };
+    return failoverFetch(url, { ...options, headers });
+}
+
 async function clearToken() {
-    return chrome.storage.local.remove('jwtToken');
+    return chrome.storage.local.remove(['jwtToken', 'refreshToken', 'proxyAccess']);
 }
 
 async function saveUser(user) {
@@ -1484,7 +1614,7 @@ async function fetchServerWhitelist() {
     try {
         const token = await getToken();
         if (!token) return null;
-        const response = await fetch(`${API_BASE_URL}/whitelist`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/whitelist`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -1511,7 +1641,7 @@ async function pushServerWhitelist(urls) {
     try {
         const token = await getToken();
         if (!token) return false;
-        const response = await fetch(`${API_BASE_URL}/whitelist`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/whitelist`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
@@ -1797,7 +1927,7 @@ async function loadSubscription() {
         const token = await getToken();
         if (!token) return;
         
-        const response = await fetch(`${API_BASE_URL}/billing/subscription`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/billing/subscription`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -1805,20 +1935,27 @@ async function loadSubscription() {
         
         if (!response.ok) {
             console.error('[Popup] Failed to load subscription:', response.status);
-            showNoSubscription();
+            if (response.status === 401 || response.status === 403) {
+                await disableProxyAccessForInactiveSubscription();
+                showNoSubscription();
+            } else {
+                showSubscriptionUnavailable();
+            }
             return;
         }
         
         const data = await response.json();
         
         if (data.has_active && data.subscription) {
+            await chrome.storage.local.set({ proxyAccess: true });
             showActiveSubscription(data.subscription, data.days_remaining);
         } else {
+            await disableProxyAccessForInactiveSubscription();
             showNoSubscription();
         }
     } catch (error) {
         console.error('[Popup] Error loading subscription:', error);
-        showNoSubscription();
+        showSubscriptionUnavailable();
     } finally {
         await loadPricing();
     }
@@ -1829,7 +1966,7 @@ async function loadSubscription() {
  */
 async function loadPricing() {
     try {
-        const response = await fetch(`${API_BASE_URL}/billing/pricing`);
+        const response = await failoverFetch(`${API_BASE_URL}/billing/pricing`);
         
         if (!response.ok) {
             console.error('[Popup] Failed to load pricing:', response.status);
@@ -1845,6 +1982,10 @@ async function loadPricing() {
                 if (priceEl) {
                     priceEl.textContent = `${plan.price.toFixed(2)} ₽`;
                 }
+                const extendPriceEl = document.getElementById(`extend-price-${plan.period}`);
+                if (extendPriceEl) {
+                    extendPriceEl.textContent = `${plan.price.toFixed(2)} ₽`;
+                }
             });
         }
     } catch (error) {
@@ -1855,6 +1996,11 @@ async function loadPricing() {
 /**
  * Show active subscription
  */
+function showSubscriptionLoading() {
+    subscriptionActive.classList.add('hidden');
+    subscriptionInactive.classList.add('hidden');
+}
+
 function showActiveSubscription(subscription, daysRemaining) {
     subscriptionActive.classList.remove('hidden');
     subscriptionInactive.classList.add('hidden');
@@ -1878,6 +2024,46 @@ function showNoSubscription() {
     subscriptionActive.classList.add('hidden');
     subscriptionInactive.classList.remove('hidden');
     applySelectedPeriodVisual();
+
+    const messageTitle = subscriptionInactive.querySelector('.subscription-message p');
+    const messageText = subscriptionInactive.querySelector('.subscription-message small');
+    if (messageTitle) {
+        messageTitle.textContent = 'У вас нет активной подписки';
+    }
+    if (messageText) {
+        messageText.textContent = 'Оформите подписку для доступа к VPS серверу';
+    }
+}
+
+function showSubscriptionUnavailable() {
+    subscriptionActive.classList.add('hidden');
+    subscriptionInactive.classList.remove('hidden');
+    applySelectedPeriodVisual();
+
+    const messageTitle = subscriptionInactive.querySelector('.subscription-message p');
+    const messageText = subscriptionInactive.querySelector('.subscription-message small');
+    if (messageTitle) {
+        messageTitle.textContent = 'Не удалось проверить подписку';
+    }
+    if (messageText) {
+        messageText.textContent = 'Сервер временно недоступен. Попробуйте позже.';
+    }
+}
+
+async function disableProxyAccessForInactiveSubscription() {
+    await chrome.storage.local.set({ proxyAccess: false });
+
+    try {
+        const proxyEnabled = await getProxyStatus();
+        if (proxyEnabled) {
+            const response = await chrome.runtime.sendMessage({ action: 'disable' });
+            if (response?.success) {
+                updateProxyStatus(false);
+            }
+        }
+    } catch (error) {
+        console.warn('[Popup] Failed to disable proxy without active subscription:', error);
+    }
 }
 
 /**
@@ -1896,7 +2082,7 @@ async function handleBuySubscription() {
         showLoading();
         
         // Create payment
-        const response = await fetch(`${API_BASE_URL}/billing/payment`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/billing/payment`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -16,7 +16,7 @@ const ENVIRONMENTS = {
     // Proxy server port
     port: 18183,
 
-    // Proxy scheme: "http", "https", "socks4", "socks5"
+    // Proxy scheme supported by the extension runtime: "http" or "https"
     scheme: 'http',
 
     // JWT Authentication
@@ -55,17 +55,33 @@ const ENVIRONMENTS = {
   },
 
   prod: {
-    host: '108.165.174.119',
+    // Домен с двумя A-записями (DNS round-robin между prod1/prod2).
+    // Браузер при ошибке connect к одному IP автоматически пробует второй (Happy Eyeballs).
+    host: 'vpsconecttech.ru',
     port: 18183,
     scheme: 'http',
+    endpoints: [
+      {
+        id: 'primary',
+        label: 'Основной',
+        host: 'vpsconecttech.ru',
+        port: 18183,
+        scheme: 'http',
+        authAPI: {
+          host: 'vpsconecttech.ru',
+          port: 18184,
+          baseURL: 'http://vpsconecttech.ru:18184'
+        }
+      }
+    ],
     auth: {
       enabled: true,
       type: 'jwt'
     },
     authAPI: {
-      host: '108.165.174.119',
+      host: 'vpsconecttech.ru',
       port: 18184,
-      baseURL: 'http://108.165.174.119:18184'
+      baseURL: 'http://vpsconecttech.ru:18184'
     },
     bypassList: [
       'localhost',
@@ -75,7 +91,10 @@ const ENVIRONMENTS = {
       '10.*',
       '172.16.*',
       '<local>',
-      '108.165.174.119'
+      // Не проксировать запросы к серверам прокси-сервиса (домен + оба backend-IP).
+      'vpsconecttech.ru',
+      '108.165.174.119',
+      '140.235.130.26'
     ],
     autoEnable: false,
     showBadge: true

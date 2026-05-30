@@ -1,0 +1,9 @@
+{
+  "name": "vps-connect-extension",
+  "version": "1.0.24",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

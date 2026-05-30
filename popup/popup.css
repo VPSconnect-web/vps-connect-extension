@@ -785,6 +785,20 @@ body {
     background: #e8eff7;
 }
 
+.btn-warning {
+    background: linear-gradient(135deg, var(--brand-warning) 0%, #f97316 100%);
+    color: #fff;
+    margin-top: 8px;
+}
+
+.btn-warning:hover {
+    background: linear-gradient(135deg, #d97706 0%, #ea580c 100%);
+}
+
+.btn-warning.hidden {
+    display: none;
+}
+
 .btn-large {
     padding: 16px;
     font-size: 16px;

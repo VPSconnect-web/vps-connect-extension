@@ -83,6 +83,7 @@
                         <button type="button" id="forgot-password-link" class="link-button">Забыли пароль?</button>
                     </div>
                     <button type="submit" class="btn btn-primary">Войти</button>
+                    <button type="button" id="reset-sessions-btn" class="btn btn-warning hidden">Сбросить сессии и войти</button>
                     <div class="error-message" id="login-error"></div>
                 </form>
             </div>
@@ -309,13 +310,6 @@
                     <span>Подключиться</span>
                 </button>
 
-                <div class="proxy-info" id="proxy-info">
-                    <div class="info-item">
-                        <span class="label">Сервер:</span>
-                        <span class="value" id="proxy-server">—</span>
-                    </div>
-                </div>
-                
                 <!-- Connection Mode Selection -->
                 <div class="proxy-mode">
                     <div class="mode-header">
@@ -357,6 +351,42 @@
             <!-- Actions -->
             <div class="actions">
                 <button id="logout-btn" class="btn btn-secondary btn-small">Выйти</button>
+            </div>
+        </div>
+
+        <!-- Extend Subscription Modal -->
+        <div id="extend-subscription-modal" class="forgot-modal hidden">
+            <div class="forgot-modal-content">
+                <h3>Продлить подписку</h3>
+                <p class="forgot-description">Выберите период продления:</p>
+                <div class="pricing-plans" id="extend-pricing-plans">
+                    <div class="plan-option extend-plan-option" data-period="1">
+                        <div class="plan-header">
+                            <span class="plan-duration">1 месяц</span>
+                            <span class="plan-price extend-price" id="extend-price-1">150 ₽</span>
+                        </div>
+                    </div>
+                    <div class="plan-option extend-plan-option recommended" data-period="3">
+                        <div class="plan-badge">Выгодно</div>
+                        <div class="plan-header">
+                            <span class="plan-duration">3 месяца</span>
+                            <span class="plan-price extend-price" id="extend-price-3">427.50 ₽</span>
+                        </div>
+                        <div class="plan-discount">Скидка 5%</div>
+                    </div>
+                    <div class="plan-option extend-plan-option" data-period="6">
+                        <div class="plan-badge">Максимум</div>
+                        <div class="plan-header">
+                            <span class="plan-duration">6 месяцев</span>
+                            <span class="plan-price extend-price" id="extend-price-6">810 ₽</span>
+                        </div>
+                        <div class="plan-discount">Скидка 10%</div>
+                    </div>
+                </div>
+                <div class="form-buttons" style="margin-top:16px;">
+                    <button type="button" id="extend-modal-cancel" class="btn btn-secondary">Отмена</button>
+                    <button type="button" id="extend-modal-confirm" class="btn btn-primary">Оплатить</button>
+                </div>
             </div>
         </div>
 
